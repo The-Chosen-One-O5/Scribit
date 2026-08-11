@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="scribit_launcher_bg">#6558E8</color>
+    <color name="scribit_light_bg">#F8F7FC</color>
+    <color name="scribit_dark_bg">#111116</color>
+</resources>
