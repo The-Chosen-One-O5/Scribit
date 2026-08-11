@@ -29,6 +29,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
+import com.thechosenone.scribit.BuildConfig
 import com.thechosenone.scribit.data.AppSettings
 import com.thechosenone.scribit.data.DocumentRecord
 import kotlinx.coroutines.delay
@@ -85,7 +86,9 @@ private val ScribitShapes = Shapes(
 fun ScribitApp(
     viewModel: ScribitViewModel,
     onImport: () -> Unit,
-    onScan: () -> Unit
+    onScan: () -> Unit,
+    onExportBackup: () -> Unit,
+    onRestoreBackup: () -> Unit
 ) {
     val settings by viewModel.settings
     val selected by viewModel.selectedDocument
@@ -161,13 +164,17 @@ fun ScribitApp(
                     !settings.isConfigured -> SetupScreen(
                         initial = settings,
                         viewModel = viewModel,
-                        firstRun = true
+                        firstRun = true,
+                        onExportBackup = onExportBackup,
+                        onRestoreBackup = onRestoreBackup
                     )
                     showSettings -> SetupScreen(
                         initial = settings,
                         viewModel = viewModel,
                         firstRun = false,
-                        onBack = { showSettings = false }
+                        onBack = { showSettings = false },
+                        onExportBackup = onExportBackup,
+                        onRestoreBackup = onRestoreBackup
                     )
                     selected != null -> DocumentDetailScreen(
                         document = selected!!,
@@ -218,6 +225,8 @@ private fun SetupScreen(
     initial: AppSettings,
     viewModel: ScribitViewModel,
     firstRun: Boolean,
+    onExportBackup: () -> Unit,
+    onRestoreBackup: () -> Unit,
     onBack: (() -> Unit)? = null
 ) {
     var baseUrl by remember(initial.apiBaseUrl) { mutableStateOf(initial.apiBaseUrl) }
@@ -251,6 +260,40 @@ private fun SetupScreen(
                     Text(
                         if (firstRun) "A quiet little document brain that lives on your phone."
                         else "AI provider, appearance, and privacy controls.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        if (firstRun) {
+            item {
+                SectionCard {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                            Icon(Icons.Default.Restore, null, Modifier.padding(10.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Already used Scribit?", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text("Restore your documents and metadata before entering your API key.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedButton(
+                        onClick = onRestoreBackup,
+                        enabled = !busy,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Icon(Icons.Default.Restore, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(7.dp))
+                        Text("Restore Scribit backup")
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Backups restore your archive, metadata and non-secret settings. Your API key is never stored in the backup, so you will enter it again on this device.",
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -378,6 +421,68 @@ private fun SetupScreen(
                 Text("Follow your phone, stay light, or stay dark.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(12.dp))
                 ThemeChooser(selected = initial.themeMode, onSelect = viewModel::setThemeMode)
+            }
+        }
+
+        if (!firstRun) {
+            item {
+                SectionCard {
+                    Text("Backup & restore", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Keep a portable copy of Scribit's archive and metadata before changing phones or doing a reinstall.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(
+                            onClick = onExportBackup,
+                            enabled = !busy,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Icon(Icons.Default.Save, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(7.dp))
+                            Text("Back up")
+                        }
+                        OutlinedButton(
+                            onClick = onRestoreBackup,
+                            enabled = !busy,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Icon(Icons.Default.Restore, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(7.dp))
+                            Text("Restore")
+                        }
+                    }
+                    Spacer(Modifier.height(9.dp))
+                    Text(
+                        "The backup includes Scribit's document copies, local metadata and non-secret settings. API keys are intentionally excluded.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        item {
+            SectionCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                        Icon(Icons.Default.Info, null, Modifier.padding(10.dp), tint = MaterialTheme.colorScheme.primary)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("About Scribit", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(
+                            "Version ${BuildConfig.VERSION_NAME} · build ${BuildConfig.VERSION_CODE}",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                DetailLine("Package", BuildConfig.APPLICATION_ID)
+                DetailLine("Backup format", "v1")
             }
         }
 

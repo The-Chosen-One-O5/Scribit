@@ -1,0 +1,26 @@
+SCRIBIT v1.2 — ONE-TIME SIGNING RESET
+=====================================
+
+This release starts Scribit's permanent signed-update line.
+
+BEFORE pushing v1.2 to GitHub:
+1. Keep the separate Scribit-Signing-Private folder OUTSIDE this repository.
+2. Run UPLOAD_SIGNING_SECRETS.cmd from that private folder once.
+3. You can run VERIFY_GITHUB_SIGNING.cmd in this repo to confirm the four secret NAMES exist.
+4. Push this project with UPDATE_GITHUB.cmd.
+5. GitHub Actions should build a signed release APK and publish Scribit.apk under v1.2.0.
+
+ON YOUR PHONE:
+- The old temporary/debug-signed Scribit cannot be updated into this signed release.
+- If you are okay re-adding the old documents, uninstall the old build once and install v1.2.0.
+- From v1.2.0 onward, keep using the same signing key. Future signed APKs should install with Android's normal Update flow and retain app data.
+
+BACKUPS FROM v1.2 ONWARD:
+- Settings -> Backup & restore -> Back up
+- Fresh install -> Restore Scribit backup
+- API keys are deliberately not included in portable backups.
+
+DO NOT commit or upload:
+- signing keystores (.p12/.jks/.keystore)
+- signing-info.env
+- decoded/base64 signing-key files

@@ -7,7 +7,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import org.json.JSONArray
 
-class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db", null, 2) {
+class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db", null, DATABASE_VERSION) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """
@@ -34,7 +34,8 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
                 search_terms_json TEXT NOT NULL DEFAULT '[]',
                 confidence REAL NOT NULL DEFAULT 0,
                 status TEXT NOT NULL DEFAULT 'processing',
-                error_message TEXT NOT NULL DEFAULT ''
+                error_message TEXT NOT NULL DEFAULT '',
+                metadata_updated_at INTEGER NOT NULL DEFAULT 0
             )
             """.trimIndent()
         )
@@ -61,9 +62,14 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        // Migrations are intentionally additive. Never drop/recreate the documents table on upgrade:
+        // users may have private archive files and metadata that must survive every app update.
         if (oldVersion < 2) {
             db.execSQL("ALTER TABLE documents ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''")
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_documents_content_hash ON documents(content_hash)")
+        }
+        if (oldVersion < 3) {
+            db.execSQL("ALTER TABLE documents ADD COLUMN metadata_updated_at INTEGER NOT NULL DEFAULT 0")
         }
     }
 
@@ -84,6 +90,38 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
         return id
     }
 
+
+    @Synchronized
+    fun insertRestored(record: DocumentRecord): Long {
+        val values = ContentValues().apply {
+            put("file_id", record.fileId)
+            put("original_name", record.originalName)
+            put("archive_path", record.archivePath)
+            put("mime_type", record.mimeType)
+            put("size_bytes", record.sizeBytes)
+            put("imported_at", record.importedAt)
+            put("content_hash", record.contentHash)
+            put("title", record.title)
+            put("category", record.category)
+            put("document_type", record.documentType)
+            put("organization", record.organization)
+            put("issue_date", record.issueDate)
+            put("expiry_date", record.expiryDate)
+            put("academic_year", record.academicYear)
+            put("semester", record.semester)
+            put("identifiers_json", record.identifiersJson)
+            put("tags_json", record.tagsJson)
+            put("summary", record.summary)
+            put("search_terms_json", record.searchTermsJson)
+            put("confidence", record.confidence)
+            put("status", record.status)
+            put("error_message", record.errorMessage)
+            put("metadata_updated_at", System.currentTimeMillis())
+        }
+        val id = writableDatabase.insertOrThrow("documents", null, values)
+        upsertFts(getById(id)!!)
+        return id
+    }
 
     @Synchronized
     fun findDuplicateByHash(contentHash: String): DocumentRecord? {
@@ -174,6 +212,7 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
             put("confidence", metadata.confidence)
             put("status", if (metadata.needsReview) DocumentRecord.STATUS_REVIEW else DocumentRecord.STATUS_READY)
             put("error_message", "")
+            put("metadata_updated_at", System.currentTimeMillis())
         }
         writableDatabase.update("documents", values, "id=?", arrayOf(id.toString()))
         getById(id)?.let(::upsertFts)
@@ -203,6 +242,7 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
             put("summary", summary.trim())
             put("status", DocumentRecord.STATUS_READY)
             put("error_message", "")
+            put("metadata_updated_at", System.currentTimeMillis())
         }
         writableDatabase.update("documents", values, "id=?", arrayOf(id.toString()))
         getById(id)?.let(::upsertFts)
@@ -213,6 +253,7 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
         val values = ContentValues().apply {
             put("status", DocumentRecord.STATUS_REVIEW)
             put("error_message", message.take(1000))
+            put("metadata_updated_at", System.currentTimeMillis())
         }
         writableDatabase.update("documents", values, "id=?", arrayOf(id.toString()))
     }
@@ -220,6 +261,10 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
     fun getById(id: Long): DocumentRecord? = readableDatabase.query(
         "documents", null, "id=?", arrayOf(id.toString()), null, null, null
     ).use { cursor -> if (cursor.moveToFirst()) cursor.toRecord() else null }
+
+    fun listAllForBackup(): List<DocumentRecord> = queryRecords(
+        "SELECT * FROM documents ORDER BY imported_at ASC", emptyArray()
+    )
 
     fun listRecent(limit: Int = 100): List<DocumentRecord> = queryRecords(
         "SELECT * FROM documents ORDER BY imported_at DESC LIMIT ?", arrayOf(limit.toString())
@@ -329,4 +374,9 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
         status = getString(getColumnIndexOrThrow("status")),
         errorMessage = getString(getColumnIndexOrThrow("error_message"))
     )
+
+    companion object {
+        private const val DATABASE_VERSION = 3
+    }
+
 }

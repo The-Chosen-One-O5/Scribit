@@ -1,4 +1,4 @@
-name: Build & Publish Scribit APK
+name: Build & Publish Signed Scribit APK
 
 on:
   workflow_dispatch:
@@ -40,25 +40,71 @@ jobs:
       - name: Install Android 36 build tools
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Build installable debug APK
-        run: gradle :app:assembleDebug --stacktrace
+      - name: Verify signing secrets exist
+        env:
+          KEYSTORE_B64: ${{ secrets.SCRIBIT_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.SCRIBIT_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.SCRIBIT_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.SCRIBIT_KEY_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE_B64" || (echo "Missing SCRIBIT_KEYSTORE_BASE64" && exit 1)
+          test -n "$STORE_PASSWORD" || (echo "Missing SCRIBIT_KEYSTORE_PASSWORD" && exit 1)
+          test -n "$KEY_ALIAS" || (echo "Missing SCRIBIT_KEY_ALIAS" && exit 1)
+          test -n "$KEY_PASSWORD" || (echo "Missing SCRIBIT_KEY_PASSWORD" && exit 1)
+
+      - name: Restore permanent release keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.SCRIBIT_KEYSTORE_BASE64 }}
+        run: |
+          KEYSTORE_PATH="$RUNNER_TEMP/scribit-release.p12"
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$KEYSTORE_PATH"
+          echo "SCRIBIT_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+
+      - name: Expose signing credentials to Gradle
+        run: |
+          echo "SCRIBIT_KEYSTORE_PASSWORD=${{ secrets.SCRIBIT_KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
+          echo "SCRIBIT_KEY_ALIAS=${{ secrets.SCRIBIT_KEY_ALIAS }}" >> "$GITHUB_ENV"
+          echo "SCRIBIT_KEY_PASSWORD=${{ secrets.SCRIBIT_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+
+      - name: Build signed release APK
+        run: gradle :app:assembleRelease --stacktrace
 
       - name: Prepare friendly APK filename
-        run: cp app/build/outputs/apk/debug/app-debug.apk Scribit.apk
+        run: cp app/build/outputs/apk/release/app-release.apk Scribit.apk
+
+      - name: Verify APK signature
+        run: "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs Scribit.apk
 
       - name: Upload Actions artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Scribit-APK
+          name: Scribit-signed-APK
           path: Scribit.apk
 
-      - name: Publish GitHub Release
+      - name: Read app version
+        id: version
+        shell: bash
+        run: |
+          VERSION_NAME="$(grep '^scribit.versionName=' gradle.properties | cut -d= -f2- | tr -d '\r')"
+          test -n "$VERSION_NAME"
+          echo "name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Publish versioned GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-          TAG="build-${GITHUB_RUN_NUMBER}"
-          gh release create "$TAG" Scribit.apk \
-            --target "$GITHUB_SHA" \
-            --title "Scribit — Build #${GITHUB_RUN_NUMBER}" \
-            --notes "Automatic installable build from commit $GITHUB_SHA on main." \
-            --latest
+          NOTES="Signed Android release built automatically from main at commit $GITHUB_SHA. Future Scribit APKs signed with the same private key can update this installation without deleting app data."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists, so this run will not overwrite it."
+            echo "The freshly built APK is still available as the Actions artifact."
+            echo "Bump scribit.versionName and scribit.versionCode before publishing the next release."
+          else
+            gh release create "$TAG" Scribit.apk \
+              --target "$GITHUB_SHA" \
+              --title "Scribit $TAG" \
+              --notes "$NOTES" \
+              --latest
+          fi

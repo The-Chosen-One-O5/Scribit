@@ -11,6 +11,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.thechosenone.scribit.ai.AiClassifier
 import com.thechosenone.scribit.data.AppSettings
+import com.thechosenone.scribit.data.BackupManager
 import com.thechosenone.scribit.data.DocumentDatabase
 import com.thechosenone.scribit.data.DocumentImporter
 import com.thechosenone.scribit.data.DuplicateDocumentException
@@ -28,6 +29,7 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
     private val settingsRepo = SettingsRepository(application)
     private val importer = DocumentImporter(application)
     private val classifier = AiClassifier(application)
+    private val backupManager = BackupManager(application)
 
     var settings = androidx.compose.runtime.mutableStateOf(settingsRepo.get())
         private set
@@ -192,6 +194,62 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
 
     fun dismissDuplicateWarning() {
         duplicateWarning.value = null
+    }
+
+    fun exportBackup(destination: Uri) {
+        viewModelScope.launch {
+            busy.value = true
+            val result = withContext(Dispatchers.IO) { runCatching { backupManager.exportTo(destination) } }
+            busy.value = false
+            result.fold(
+                onSuccess = { exported ->
+                    message.value = buildString {
+                        append("Backup saved with ${exported.documentCount} document")
+                        if (exported.documentCount != 1) append('s')
+                        append('.')
+                        if (exported.missingArchiveCount > 0) {
+                            append(" ${exported.missingArchiveCount} missing archive file")
+                            if (exported.missingArchiveCount != 1) append('s')
+                            append(" could not be included.")
+                        }
+                    }
+                },
+                onFailure = { message.value = it.message ?: "Could not create Scribit backup." }
+            )
+        }
+    }
+
+    fun restoreBackup(source: Uri) {
+        viewModelScope.launch {
+            busy.value = true
+            val result = withContext(Dispatchers.IO) { runCatching { backupManager.restoreFrom(source) } }
+            busy.value = false
+            result.fold(
+                onSuccess = { restored ->
+                    settings.value = settingsRepo.get()
+                    refresh()
+                    message.value = buildString {
+                        append("Restored ${restored.restoredCount} document")
+                        if (restored.restoredCount != 1) append('s')
+                        append('.')
+                        if (restored.duplicateCount > 0) {
+                            append(" Skipped ${restored.duplicateCount} exact duplicate")
+                            if (restored.duplicateCount != 1) append('s')
+                            append('.')
+                        }
+                        if (restored.missingFileCount > 0) {
+                            append(" ${restored.missingFileCount} backup file")
+                            if (restored.missingFileCount != 1) append('s')
+                            append(" was missing.")
+                        }
+                        if (restored.settingsRestored && settings.value.apiKey.isBlank()) {
+                            append(" Re-enter your API key to finish setup.")
+                        }
+                    }
+                },
+                onFailure = { message.value = it.message ?: "Could not restore this Scribit backup." }
+            )
+        }
     }
 
     fun smartSearch(query: String) {

@@ -4,6 +4,20 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val scribitVersionName = providers.gradleProperty("scribit.versionName").get()
+val scribitVersionCode = providers.gradleProperty("scribit.versionCode").get().toInt()
+
+val releaseKeystorePath = System.getenv("SCRIBIT_KEYSTORE_PATH")
+val releaseKeystorePassword = System.getenv("SCRIBIT_KEYSTORE_PASSWORD")
+val releaseKeyAlias = System.getenv("SCRIBIT_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("SCRIBIT_KEY_PASSWORD")
+val releaseSigningReady = listOf(
+    releaseKeystorePath,
+    releaseKeystorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.thechosenone.scribit"
     compileSdk = 36
@@ -12,11 +26,23 @@ android {
         applicationId = "com.thechosenone.scribit"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = scribitVersionCode
+        versionName = scribitVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
+    }
+
+    signingConfigs {
+        if (releaseSigningReady) {
+            create("release") {
+                storeFile = file(releaseKeystorePath!!)
+                storeType = "PKCS12"
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
     }
 
     buildTypes {
@@ -26,6 +52,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfigs.findByName("release")?.let { signingConfig = it }
         }
     }
 
@@ -33,7 +60,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-
 
     buildFeatures {
         compose = true
@@ -44,7 +70,6 @@ android {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
 }
-
 
 kotlin {
     compilerOptions {

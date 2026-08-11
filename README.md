@@ -4,12 +4,12 @@
 
 <p align="center">
   A private, phone-first document archive for Android.<br/>
-  Import the ugly filenames. Let Scribit make sense of them.
+  Messy files in. Useful documents out.
 </p>
 
 <p align="center">
   <a href="https://github.com/The-Chosen-One-O5/Scribit/releases/latest/download/Scribit.apk">
-    <img alt="Install Scribit" src="https://img.shields.io/badge/Install-Scribit.apk-6558E8?style=for-the-badge&logo=android&logoColor=white" />
+    <img alt="Download Scribit APK" src="https://img.shields.io/badge/Download-Scribit.apk-6558E8?style=for-the-badge&logo=android&logoColor=white" />
   </a>
   &nbsp;
   <img alt="Android 8+" src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white" />
@@ -17,137 +17,258 @@
 
 ## What is Scribit?
 
-My phone has always had the same problem: the important documents are technically *there*, but they are buried under filenames like `IMG_8392.jpg`, `scan.pdf`, and whatever WhatsApp decided to call a file that day.
+My phone has never had a *document storage* problem. It has had a *finding the document later* problem.
 
-Scribit is my attempt at fixing that without turning the phone into a tiny server.
+A marksheet becomes `scan_29491.pdf`. A certificate sits in Downloads next to memes and random screenshots. Something important arrives through WhatsApp and six months later I remember what it looked like, but not what the file was called.
 
-You share or import a document, Scribit keeps a private archive copy, and an OpenAI-compatible model can work out what the file actually is: a marksheet, passport, permit, certificate, bill, letter, etc. The useful metadata is stored locally so you can find the file later without remembering the exact filename.
+Scribit is a small Android app I built around that problem.
 
-The original file is never renamed, moved, or deleted by the AI.
+You import or share a PDF, image, or text document. Scribit keeps its own private archive copy, asks your OpenAI-compatible model to understand the document, then stores useful metadata locally so you can find it again without memorising filenames.
 
-## What it can do
+The AI never gets permission to rename, move, overwrite, or delete the original file.
 
-- Import **PDFs, images, and text files** from Android's file picker.
-- Receive files directly through **Share → Scribit** from other Android apps.
-- Take a quick photo/scan using the system camera.
-- Classify documents with your own **OpenAI-compatible API**.
-- Extract useful details such as:
+## Features
+
+- Import **PDFs, images and text files** with Android's file picker.
+- Use **Share → Scribit** from WhatsApp, Files, browsers and other Android apps.
+- Take a quick document photo with the system camera.
+- Use your own **OpenAI-compatible API** instead of being tied to a Scribit account.
+- Extract useful metadata such as:
   - title
-  - category and document type
-  - organisation/institution
-  - issue and expiry dates
+  - category
+  - document type
+  - organisation / institution
+  - issue date
+  - expiry date
+  - academic year / semester
   - tags
   - summary
-  - searchable terms
-- Keep a fast **local SQLite + full-text search index**.
-- Use **Smart Search** for vague searches such as `that uni admission letter`.
-- Flag uncertain classifications as **Needs Review** instead of pretending the AI is always right.
-- Let you manually edit metadata or re-run classification.
-- Notify you about documents that are getting close to their expiry date.
-- Follow the phone theme, or stay permanently in **Light** or **Dark** mode.
+  - extra search terms
+- Search locally with SQLite full-text search.
+- Use **Smart Search** when you remember the idea rather than the exact words.
+- Put uncertain AI results into **Needs Review** instead of quietly pretending they are correct.
+- Edit metadata by hand or re-run classification.
+- Long-press a library item to **delete it from Scribit**. The source file outside Scribit stays untouched.
+- Detect **exact duplicate files locally with SHA-256** before running AI again.
+- Show a clear red duplicate warning instead of storing the same file twice.
+- Track expiry dates and schedule expiry notifications.
+- Choose **System, Light or Dark** appearance.
+- Create a portable **Scribit backup ZIP** and restore it later.
 
 ## Install
 
-### Easiest way
+### Normal installation
 
-- Tap the **Download Scribit APK** button near the top of this README.
-- Download `Scribit.apk` from the GitHub Release.
-- Open the downloaded APK on your Android phone.
-- Android may ask you to allow installs from your browser/files app. Allow it for that app, then continue.
-- Install Scribit and open it.
+- Tap **Download Scribit APK** at the top of this page.
+- Download `Scribit.apk` from the latest GitHub Release.
+- Open the APK on your Android phone.
+- If Android asks, allow your browser or file manager to install apps from that source.
+- Install Scribit.
 
-> The GitHub build is currently a debug-signed APK. It is installable, but Android may show the usual warning for apps installed outside the Play Store.
+Scribit currently targets Android 8.0 and newer.
 
-### First launch
+### Updating Scribit
 
-Scribit asks for four things:
+Official GitHub Releases are signed with the same permanent Scribit signing key.
 
-- **API base URL** — for example `https://your-provider.example/v1`
+That means normal future updates should be simple:
+
+- Download the newer `Scribit.apk`.
+- Open it.
+- Android should offer **Update** rather than asking you to uninstall the current app.
+- Tap **Update**.
+- Your local Scribit database, settings and archive remain in place.
+
+Do **not** uninstall Scribit just to install a normal update. Uninstalling an Android app removes its private app data.
+
+> Very early Scribit debug builds used temporary debug certificates. Those old builds cannot be upgraded into the permanently signed release line because Android sees them as a different signer. That was a one-time project setup mistake; releases from the permanent signing setup onward use the same key.
+
+## First launch
+
+Scribit asks for:
+
+- **API base URL** — for example `https://provider.example/v1`
 - **API key**
-- **Model name**
+- **Model**
 - **Vision support** — enable this when the model can understand images
 
-Use **Test** before saving if you want to make sure the provider is reachable.
+You can test the connection before saving it.
 
-Your API key is encrypted using Android Keystore before it is stored on the phone.
+The API key is encrypted using Android Keystore before it is stored locally.
 
-## Daily use
+## Using Scribit
 
-There are three easy ways to put something into Scribit:
+### Add a document
 
-- **Share it:** open a PDF/image in WhatsApp, Files, your browser, etc. → Share → Scribit.
-- **Import it:** open Scribit → Add document.
-- **Scan it:** tap the camera button and take a picture.
+Use whichever route is quickest:
 
-After that, the app queues the classification work with Android WorkManager. It does **not** keep a terminal, Python process, polling loop, or permanent background service alive.
+- **Share:** open the document in another app → Share → Scribit.
+- **Import:** open Scribit → Add document.
+- **Scan:** use the camera button inside Scribit.
 
-When classification finishes, the document appears in the library. If the model is unsure, it goes into **Needs Review** so you can correct it.
+Scribit calculates the file's SHA-256 hash locally first. If that exact file is already in the library, the import stops immediately and shows a duplicate warning. No AI request is spent on that check.
 
-## Privacy / data behaviour
+For a new file, classification is queued through Android WorkManager. Scribit does not keep a terminal, Python process, polling loop, or permanent background service running.
 
-A few rules are intentionally boring because documents can be important:
+### Delete a document
 
-- Scribit never asks the AI to move, rename, overwrite, or delete your original file.
-- An imported copy lives inside Scribit's private app storage.
-- The API key is encrypted at rest with **Android Keystore + AES-GCM**.
-- Document content is sent to your configured API only when AI processing is needed.
-- Search/index data stays in the local SQLite database.
-- There is no Scribit cloud account and no built-in cloud sync right now.
-- AI output is treated as metadata, not truth. Low-confidence results are reviewable.
+- Long-press the document in the library.
+- Confirm **Delete**.
 
-## Building it yourself
+This removes:
 
-You can build the app locally with Android Studio, but the repo is also set up so GitHub can do it for you.
+- Scribit's private archived copy
+- the local database record
+- the local search entry
 
-### GitHub Actions
+It does **not** delete the original file you imported from Downloads, WhatsApp, Drive, another file manager, etc.
 
-Every push to `main` runs **Build & Publish Scribit APK**.
+## Backup & restore
 
-The workflow:
+Open **Settings → Backup & restore**.
 
-- checks out the project
-- installs Java 17
-- installs the Android SDK/build tools
-- runs the Android debug build
-- uploads the APK as an Actions artifact
-- creates a fresh GitHub Release and marks it as the latest build
-- publishes the APK as `Scribit.apk`
+### Back up
 
-That last step is what powers the **Download Scribit APK** button at the top of this page.
+- Tap **Back up**.
+- Pick where you want to save the generated `.zip` file.
+- Keep that ZIP somewhere you control.
 
-### Android Studio
+A Scribit backup contains:
 
-- Clone this repository.
-- Open the project folder in a recent Android Studio.
-- Let Gradle sync.
-- Install Android SDK 36 if Android Studio asks for it.
-- Build the `app` debug variant.
-- The APK will be under:
+- Scribit's private document copies
+- extracted metadata
+- tags and summaries
+- dates and classifications
+- document status
+- non-secret app settings such as provider URL, model, vision setting and theme
 
-```text
-app/build/outputs/apk/debug/app-debug.apk
-```
+The backup deliberately does **not** contain your API key.
 
-The repository contains `gradle-wrapper.properties`, but not `gradle-wrapper.jar`. The GitHub workflow does not need the wrapper JAR because it installs the requested Gradle version directly.
+### Restore
+
+You can restore from either:
+
+- **Settings → Backup & restore → Restore**, or
+- the **Restore Scribit backup** button on the first-launch screen of a fresh installation
+
+Restore merges documents into the current library. Exact file duplicates are skipped using the same local SHA-256 check.
+
+The backup format is versioned independently from the SQLite database. Scribit rebuilds its database records from the backup manifest instead of blindly replacing the live database file, which gives future app versions room to migrate their schema safely.
+
+After restoring onto a fresh phone/install, re-enter your API key because that secret is intentionally device-local.
+
+## Privacy notes
+
+A few rules are intentionally boring because the files may not be:
+
+- The AI does not rename, move, overwrite, or delete your original documents.
+- Scribit works from a private app-owned archive copy.
+- Your API key is encrypted with Android Keystore.
+- The API key is excluded from portable backups.
+- Exact duplicate detection happens locally with SHA-256.
+- Search/index data lives in the local SQLite database.
+- AI content is sent only to the API provider you configure when AI work is requested.
+- There is no built-in Scribit cloud account or Scribit cloud sync.
+- Android automatic app backup is disabled; portable backup is an explicit action you control.
 
 ## API compatibility
 
-Scribit targets OpenAI-style `POST /v1/chat/completions` APIs.
+Scribit currently targets OpenAI-style `POST /v1/chat/completions` APIs.
 
-- If your base URL ends in `/v1`, Scribit adds `/chat/completions`.
-- If you enter the full `/chat/completions` URL, Scribit uses it as-is.
-- Image/PDF classification expects the provider to understand the common `image_url` message format with base64 data URLs.
-- If your provider is text-only, disable Vision support. Text files can still be classified, while image/PDF metadata can be filled in manually.
+- If the base URL ends in `/v1`, Scribit adds `/chat/completions`.
+- If you enter the complete `/chat/completions` endpoint, Scribit uses it as-is.
+- Vision classification uses image data URLs in the common OpenAI-compatible message format.
+- PDFs are rendered into page images for vision classification.
+- Text-only models can still classify text files; image/PDF metadata can be edited manually when Vision is disabled.
+
+## Building the project
+
+### GitHub Actions
+
+Every push to `main` runs **Build & Publish Signed Scribit APK**.
+
+The workflow:
+
+- checks out the source
+- installs Java 17
+- installs Android SDK 36 / Build Tools 36
+- restores the private signing keystore from GitHub Actions secrets
+- builds the **release** variant
+- verifies the resulting APK signature
+- uploads the APK as an Actions artifact
+- creates the versioned GitHub Release when that version tag does not already exist
+- publishes the asset as exactly `Scribit.apk`
+
+The button at the top of this README always targets:
+
+```text
+/releases/latest/download/Scribit.apk
+```
+
+### Permanent signing secrets
+
+The private signing key is **not** stored in this repository.
+
+The repository owner configures these Actions secrets:
+
+- `SCRIBIT_KEYSTORE_BASE64`
+- `SCRIBIT_KEYSTORE_PASSWORD`
+- `SCRIBIT_KEY_ALIAS`
+- `SCRIBIT_KEY_PASSWORD`
+
+The same private keystore must be kept for the lifetime of this package ID:
+
+```text
+com.thechosenone.scribit
+```
+
+The permanent release certificate currently has this public SHA-256 fingerprint:
+
+```text
+04:B1:23:79:C7:4B:DF:26:DE:60:ED:75:3A:31:F9:3A:C4:31:EA:C0:E8:2C:E8:7D:48:AA:7E:5F:47:DE:05:F4
+```
+
+Losing that key means a differently signed APK cannot update phones that already have the signed Scribit release installed.
+
+### Android Studio
+
+For development builds:
+
+- Clone the repository.
+- Open it in a recent Android Studio.
+- Let Gradle sync.
+- Install Android SDK 36 if prompted.
+- Build/run the `debug` variant normally.
+
+For a locally signed `release` build, provide the same four signing values as environment variables before running `assembleRelease`.
+
+## Versioning
+
+The app version lives in `gradle.properties`:
+
+```properties
+scribit.versionName=1.2.0
+scribit.versionCode=3
+```
+
+For each public release:
+
+- bump `scribit.versionName`
+- increment `scribit.versionCode`
+- push to `main`
+
+GitHub Actions publishes the release as `v<versionName>`. If that release already exists, the workflow keeps the existing release untouched and only uploads the new Actions artifact; bump the version before publishing another APK release.
 
 ## Current limitations
 
-- PDFs are classified visually from the first few rendered pages rather than through a full PDF text-extraction engine.
-- Smart Search currently plans a query over local metadata/full-text search; it is not a vector embedding database yet.
-- There is no cross-device sync or automatic backup yet.
-- The GitHub APK is a debug build, not a Play Store release build.
+- PDF understanding is visual and uses the first few rendered pages rather than a full document text-extraction pipeline.
+- Smart Search is AI-assisted query planning over local metadata/full-text search; it is not an embeddings database yet.
+- There is no automatic cross-device sync.
+- Backup is manual rather than scheduled/cloud-synced.
+- Scribit is distributed as an APK from GitHub rather than through Google Play.
 
-## Why the name?
+## Why “Scribit”?
 
-**Scribit** is basically *scribble + bit*: messy documents in, useful little bits of information out.
+Mostly *scribble + bit*.
 
-And yes, the purple squiggle in the logo is supposed to look a little handwritten. That is the point. :)
+The files arrive messy. Scribit keeps the useful bits. The purple squiggle is allowed to look slightly handwritten because that is kind of the whole point.

@@ -14,6 +14,8 @@ import com.thechosenone.scribit.ui.ScribitApp
 import com.thechosenone.scribit.ui.ScribitViewModel
 import com.thechosenone.scribit.worker.ExpiryWorker
 import java.io.File
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 class MainActivity : ComponentActivity() {
     private val viewModel: ScribitViewModel by viewModels()
@@ -31,6 +33,14 @@ class MainActivity : ComponentActivity() {
 
     private val requestNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
+    private val createBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        uri?.let(viewModel::exportBackup)
+    }
+
+    private val restoreBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let(viewModel::restoreBackup)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ExpiryWorker.schedule(this)
@@ -40,7 +50,14 @@ class MainActivity : ComponentActivity() {
             ScribitApp(
                 viewModel = viewModel,
                 onImport = { openDocuments.launch(arrayOf("application/pdf", "image/*", "text/*")) },
-                onScan = { launchCamera() }
+                onScan = { launchCamera() },
+                onExportBackup = {
+                    val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HHmm"))
+                    createBackup.launch("Scribit-backup-$stamp.zip")
+                },
+                onRestoreBackup = {
+                    restoreBackup.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
+                }
             )
         }
         handleIntent(intent)

@@ -8,3 +8,15 @@
 .externalNativeBuild/
 .cxx/
 app/build/
+
+# Never commit Android signing material.
+*.jks
+*.keystore
+*.p12
+signing-private/
+*.b64
+signing-info.env
+Scribit-Signing-Private/
+*Scribit-Signing-Private*/
+Scribit-Signing-Private.zip
+*Signing-Private*.zip
