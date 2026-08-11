@@ -11,6 +11,13 @@ import androidx.work.WorkManager
 import com.thechosenone.scribit.worker.DocumentProcessWorker
 import java.io.File
 import java.util.UUID
+import java.security.MessageDigest
+
+class DuplicateDocumentException(
+    val existingDocument: DocumentRecord
+) : IllegalStateException(
+    "This exact file is already in Scribit as \"${existingDocument.title.ifBlank { existingDocument.originalName }}\"."
+)
 
 class DocumentImporter(private val context: Context) {
     private val appContext = context.applicationContext
@@ -35,6 +42,12 @@ class DocumentImporter(private val context: Context) {
             archiveFile.outputStream().use { output -> input.copyTo(output) }
         } ?: error("Could not read this file")
 
+        val contentHash = sha256(archiveFile)
+        database.findDuplicateByHash(contentHash)?.let { duplicate ->
+            archiveFile.delete()
+            throw DuplicateDocumentException(duplicate)
+        }
+
         val id = database.insertImported(
             DocumentRecord(
                 fileId = fileId,
@@ -42,7 +55,8 @@ class DocumentImporter(private val context: Context) {
                 archivePath = archiveFile.absolutePath,
                 mimeType = mime,
                 sizeBytes = archiveFile.length(),
-                importedAt = System.currentTimeMillis()
+                importedAt = System.currentTimeMillis(),
+                contentHash = contentHash
             )
         )
         enqueueProcessing(id)
@@ -58,6 +72,12 @@ class DocumentImporter(private val context: Context) {
             if (!extension.isNullOrBlank()) append('.').append(extension)
         })
         file.copyTo(archiveFile, overwrite = false)
+        val contentHash = sha256(archiveFile)
+        database.findDuplicateByHash(contentHash)?.let { duplicate ->
+            archiveFile.delete()
+            throw DuplicateDocumentException(duplicate)
+        }
+
         val id = database.insertImported(
             DocumentRecord(
                 fileId = fileId,
@@ -65,11 +85,25 @@ class DocumentImporter(private val context: Context) {
                 archivePath = archiveFile.absolutePath,
                 mimeType = mimeType,
                 sizeBytes = archiveFile.length(),
-                importedAt = System.currentTimeMillis()
+                importedAt = System.currentTimeMillis(),
+                contentHash = contentHash
             )
         )
         enqueueProcessing(id)
         return id
+    }
+
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read <= 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun enqueueProcessing(id: Long) {
@@ -78,6 +112,7 @@ class DocumentImporter(private val context: Context) {
             .setInputData(Data.Builder().putLong(DocumentProcessWorker.KEY_DOCUMENT_ID, id).build())
             .setConstraints(constraints)
             .addTag("document-processing")
+            .addTag("document-$id")
             .build()
         WorkManager.getInstance(appContext).enqueue(work)
     }

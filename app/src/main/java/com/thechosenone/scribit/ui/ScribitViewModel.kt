@@ -13,6 +13,7 @@ import com.thechosenone.scribit.ai.AiClassifier
 import com.thechosenone.scribit.data.AppSettings
 import com.thechosenone.scribit.data.DocumentDatabase
 import com.thechosenone.scribit.data.DocumentImporter
+import com.thechosenone.scribit.data.DuplicateDocumentException
 import com.thechosenone.scribit.data.DocumentRecord
 import com.thechosenone.scribit.data.SettingsRepository
 import com.thechosenone.scribit.worker.DocumentProcessWorker
@@ -40,6 +41,8 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
     var busy = androidx.compose.runtime.mutableStateOf(false)
         private set
     var message = androidx.compose.runtime.mutableStateOf<String?>(null)
+        private set
+    var duplicateWarning = androidx.compose.runtime.mutableStateOf<String?>(null)
         private set
 
     init { refresh() }
@@ -80,11 +83,18 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
         if (uris.isEmpty()) return
         viewModelScope.launch {
             busy.value = true
-            val errors = withContext(Dispatchers.IO) {
-                uris.mapNotNull { uri -> runCatching { importer.importUri(uri) }.exceptionOrNull()?.message }.filterNotNull()
+            val results = withContext(Dispatchers.IO) {
+                uris.map { uri -> runCatching { importer.importUri(uri) } }
             }
             busy.value = false
-            message.value = if (errors.isEmpty()) "Imported ${uris.size} document${if (uris.size == 1) "" else "s"}." else errors.first()
+            val duplicate = results.mapNotNull { it.exceptionOrNull() as? DuplicateDocumentException }.firstOrNull()
+            val errors = results.mapNotNull { it.exceptionOrNull() }.filterNot { it is DuplicateDocumentException }
+            val importedCount = results.count { it.isSuccess }
+            when {
+                duplicate != null -> duplicateWarning.value = duplicate.message
+                errors.isNotEmpty() -> message.value = errors.first().message ?: "Could not import document."
+                importedCount > 0 -> message.value = "Imported $importedCount document${if (importedCount == 1) "" else "s"}."
+            }
             refresh()
         }
     }
@@ -94,7 +104,12 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
             busy.value = true
             val result = withContext(Dispatchers.IO) { runCatching { importer.importFile(file, "Scan-${System.currentTimeMillis()}.jpg", "image/jpeg") } }
             busy.value = false
-            message.value = result.fold({ "Scan imported." }, { it.message ?: "Could not import scan." })
+            val error = result.exceptionOrNull()
+            if (error is DuplicateDocumentException) {
+                duplicateWarning.value = error.message
+            } else {
+                message.value = result.fold({ "Scan imported." }, { it.message ?: "Could not import scan." })
+            }
             refresh()
         }
     }
@@ -132,6 +147,7 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
         val work = OneTimeWorkRequestBuilder<DocumentProcessWorker>()
             .setInputData(Data.Builder().putLong(DocumentProcessWorker.KEY_DOCUMENT_ID, documentId).build())
             .setConstraints(constraints)
+            .addTag("document-$documentId")
             .build()
         WorkManager.getInstance(getApplication()).enqueue(work)
         message.value = "Classification queued."
@@ -158,6 +174,24 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
                 refresh()
             }
         }
+    }
+
+    fun deleteDocument(document: DocumentRecord) {
+        viewModelScope.launch {
+            WorkManager.getInstance(getApplication<Application>()).cancelAllWorkByTag("document-${document.id}")
+            val deleted = withContext(Dispatchers.IO) { db.deleteDocument(document.id) }
+            if (deleted) {
+                if (selectedDocument.value?.id == document.id) selectedDocument.value = null
+                message.value = "Document deleted from Scribit."
+                refresh()
+            } else {
+                message.value = "Could not delete document."
+            }
+        }
+    }
+
+    fun dismissDuplicateWarning() {
+        duplicateWarning.value = null
     }
 
     fun smartSearch(query: String) {

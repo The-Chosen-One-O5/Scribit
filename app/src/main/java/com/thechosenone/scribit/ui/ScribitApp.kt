@@ -4,7 +4,9 @@ import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -88,6 +90,7 @@ fun ScribitApp(
     val settings by viewModel.settings
     val selected by viewModel.selectedDocument
     val message by viewModel.message
+    val duplicateWarning by viewModel.duplicateWarning
     var showSettings by remember { mutableStateOf(false) }
     val snackbarHost = remember { SnackbarHostState() }
 
@@ -118,6 +121,35 @@ fun ScribitApp(
                 snackbarHost.showSnackbar(it)
                 viewModel.consumeMessage()
             }
+        }
+
+        if (duplicateWarning != null) {
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissDuplicateWarning() },
+                icon = { Icon(Icons.Default.ErrorOutline, null, tint = MaterialTheme.colorScheme.error) },
+                title = {
+                    Text(
+                        "Duplicate document",
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                text = {
+                    Text(
+                        duplicateWarning ?: "This exact file is already in Scribit.",
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { viewModel.dismissDuplicateWarning() },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text("Got it")
+                    }
+                },
+                containerColor = MaterialTheme.colorScheme.errorContainer
+            )
         }
 
         Scaffold(
@@ -443,6 +475,38 @@ private fun HomeScreen(
     val query by viewModel.searchQuery
     val category by viewModel.categoryFilter
     val reviewOnly by viewModel.reviewOnly
+    var pendingDelete by remember { mutableStateOf<DocumentRecord?>(null) }
+
+    pendingDelete?.let { document ->
+        val displayName = document.title.ifBlank { document.originalName }
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            icon = { Icon(Icons.Default.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Delete document?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "\"$displayName\" will be removed from Scribit, including Scribit's private archived copy. " +
+                        "The original file you imported from elsewhere is not touched."
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("Cancel") }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteDocument(document)
+                        pendingDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Icon(Icons.Default.Delete, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Delete")
+                }
+            }
+        )
+    }
 
     LaunchedEffect(documents.any { it.status == DocumentRecord.STATUS_PROCESSING }) {
         while (documents.any { it.status == DocumentRecord.STATUS_PROCESSING }) {
@@ -554,7 +618,11 @@ private fun HomeScreen(
                 item { EmptyLibrary(onImport, onScan) }
             } else {
                 items(documents, key = { it.id }) { document ->
-                    DocumentCard(document) { viewModel.select(document) }
+                    DocumentCard(
+                        document = document,
+                        onClick = { viewModel.select(document) },
+                        onLongClick = { pendingDelete = document }
+                    )
                 }
             }
         }
@@ -604,11 +672,21 @@ private fun EmptyLibrary(onImport: () -> Unit, onScan: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun DocumentCard(document: DocumentRecord, onClick: () -> Unit) {
+private fun DocumentCard(
+    document: DocumentRecord,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
     val title = document.title.ifBlank { document.originalName }
     Surface(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            ),
         shape = RoundedCornerShape(22.dp),
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 1.dp,

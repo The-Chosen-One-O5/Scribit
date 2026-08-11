@@ -8,6 +8,7 @@ data class DocumentRecord(
     val mimeType: String,
     val sizeBytes: Long,
     val importedAt: Long,
+    val contentHash: String = "",
     val title: String = "",
     val category: String = "Other",
     val documentType: String = "",

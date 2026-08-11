@@ -7,7 +7,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import org.json.JSONArray
 
-class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db", null, 1) {
+class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db", null, 2) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """
@@ -19,6 +19,7 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
                 mime_type TEXT NOT NULL,
                 size_bytes INTEGER NOT NULL,
                 imported_at INTEGER NOT NULL,
+                content_hash TEXT NOT NULL DEFAULT '',
                 title TEXT NOT NULL DEFAULT '',
                 category TEXT NOT NULL DEFAULT 'Other',
                 document_type TEXT NOT NULL DEFAULT '',
@@ -56,9 +57,15 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
         db.execSQL("CREATE INDEX idx_documents_category ON documents(category)")
         db.execSQL("CREATE INDEX idx_documents_expiry ON documents(expiry_date)")
         db.execSQL("CREATE INDEX idx_documents_imported ON documents(imported_at DESC)")
+        db.execSQL("CREATE INDEX idx_documents_content_hash ON documents(content_hash)")
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) {
+            db.execSQL("ALTER TABLE documents ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_documents_content_hash ON documents(content_hash)")
+        }
+    }
 
     @Synchronized
     fun insertImported(record: DocumentRecord): Long {
@@ -69,11 +76,84 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
             put("mime_type", record.mimeType)
             put("size_bytes", record.sizeBytes)
             put("imported_at", record.importedAt)
+            put("content_hash", record.contentHash)
             put("status", record.status)
         }
         val id = writableDatabase.insertOrThrow("documents", null, values)
         upsertFts(getById(id)!!)
         return id
+    }
+
+
+    @Synchronized
+    fun findDuplicateByHash(contentHash: String): DocumentRecord? {
+        if (contentHash.isBlank()) return null
+
+        readableDatabase.query(
+            "documents",
+            null,
+            "content_hash=?",
+            arrayOf(contentHash),
+            null,
+            null,
+            "imported_at DESC",
+            "1"
+        ).use { cursor ->
+            if (cursor.moveToFirst()) return cursor.toRecord()
+        }
+
+        // Existing installs created before duplicate detection won't have hashes yet.
+        // Backfill them locally from Scribit's private archive, then check again.
+        readableDatabase.query(
+            "documents",
+            arrayOf("id", "archive_path"),
+            "content_hash=''",
+            null,
+            null,
+            null,
+            null
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val id = cursor.getLong(cursor.getColumnIndexOrThrow("id"))
+                val path = cursor.getString(cursor.getColumnIndexOrThrow("archive_path"))
+                val file = java.io.File(path)
+                if (!file.exists() || !file.isFile) continue
+                val hash = sha256(file)
+                val values = ContentValues().apply { put("content_hash", hash) }
+                writableDatabase.update("documents", values, "id=?", arrayOf(id.toString()))
+                if (hash == contentHash) return getById(id)
+            }
+        }
+        return null
+    }
+
+    @Synchronized
+    fun deleteDocument(id: Long): Boolean {
+        val record = getById(id) ?: return false
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("documents_fts", "doc_id=?", arrayOf(id.toString()))
+            db.delete("documents", "id=?", arrayOf(id.toString()))
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        runCatching { java.io.File(record.archivePath).delete() }
+        return true
+    }
+
+    private fun sha256(file: java.io.File): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read <= 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     @Synchronized
@@ -232,6 +312,7 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
         mimeType = getString(getColumnIndexOrThrow("mime_type")),
         sizeBytes = getLong(getColumnIndexOrThrow("size_bytes")),
         importedAt = getLong(getColumnIndexOrThrow("imported_at")),
+        contentHash = getString(getColumnIndexOrThrow("content_hash")),
         title = getString(getColumnIndexOrThrow("title")),
         category = getString(getColumnIndexOrThrow("category")),
         documentType = getString(getColumnIndexOrThrow("document_type")),
