@@ -32,6 +32,7 @@ import androidx.core.view.WindowCompat
 import com.thechosenone.scribit.BuildConfig
 import com.thechosenone.scribit.data.AppSettings
 import com.thechosenone.scribit.data.DocumentRecord
+import com.thechosenone.scribit.data.QueueStats
 import kotlinx.coroutines.delay
 import org.json.JSONArray
 import java.io.File
@@ -580,6 +581,7 @@ private fun HomeScreen(
     val query by viewModel.searchQuery
     val category by viewModel.categoryFilter
     val reviewOnly by viewModel.reviewOnly
+    val queueStats by viewModel.queueStats
     var pendingDelete by remember { mutableStateOf<DocumentRecord?>(null) }
 
     pendingDelete?.let { document ->
@@ -613,9 +615,9 @@ private fun HomeScreen(
         )
     }
 
-    LaunchedEffect(documents.any { it.status == DocumentRecord.STATUS_PROCESSING }) {
-        while (documents.any { it.status == DocumentRecord.STATUS_PROCESSING }) {
-            delay(1800)
+    LaunchedEffect(queueStats.activeCount > 0) {
+        while (queueStats.activeCount > 0) {
+            delay(2000)
             viewModel.refresh()
         }
     }
@@ -690,6 +692,10 @@ private fun HomeScreen(
                 }
             }
 
+            if (queueStats.activeCount > 0) {
+                item { QueueStatusCard(queueStats) }
+            }
+
             item {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -748,6 +754,54 @@ private fun HomeScreen(
             )
         }
     }
+}
+
+@Composable
+private fun QueueStatusCard(stats: QueueStats) {
+    Surface(
+        shape = RoundedCornerShape(22.dp),
+        color = if (stats.retrying > 0) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (stats.processing > 0) {
+                CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(Icons.Default.Schedule, null, Modifier.size(24.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (stats.retrying > 0) "AI queue is cooling down" else "AI processing queue",
+                    fontWeight = FontWeight.Bold
+                )
+                val parts = buildList {
+                    if (stats.processing > 0) add("${stats.processing} processing")
+                    if (stats.queued > 0) add("${stats.queued} waiting")
+                    if (stats.retrying > 0) add("${stats.retrying} auto-retrying")
+                }
+                Text(
+                    parts.joinToString(" · ").ifBlank { "Working in the background" },
+                    style = MaterialTheme.typography.bodySmall
+                )
+                if (stats.retrying > 0 && stats.nextRetryAt > 0) {
+                    Text(
+                        "Next automatic attempt around ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(stats.nextRetryAt))}",
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun retryDescription(document: DocumentRecord): String {
+    val whenText = if (document.retryAt > System.currentTimeMillis()) {
+        " around ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(document.retryAt))}"
+    } else {
+        " shortly"
+    }
+    return "The provider rate-limited or temporarily rejected the request. Scribit will retry$whenText; you don't need to tap Retry."
 }
 
 @Composable
@@ -818,9 +872,25 @@ private fun DocumentCard(
                     Spacer(Modifier.height(3.dp))
                     Text("Expires ${document.expiryDate}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
                 }
+                when (document.status) {
+                    DocumentRecord.STATUS_QUEUED -> {
+                        Spacer(Modifier.height(3.dp))
+                        Text("Waiting for AI analysis", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                    }
+                    DocumentRecord.STATUS_PROCESSING -> {
+                        Spacer(Modifier.height(3.dp))
+                        Text("AI is analysing…", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                    }
+                    DocumentRecord.STATUS_RETRYING -> {
+                        Spacer(Modifier.height(3.dp))
+                        Text("Rate limited · retrying automatically", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
             }
             when (document.status) {
                 DocumentRecord.STATUS_PROCESSING -> CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                DocumentRecord.STATUS_QUEUED -> Icon(Icons.Default.Schedule, "Queued", tint = MaterialTheme.colorScheme.primary)
+                DocumentRecord.STATUS_RETRYING -> Icon(Icons.Default.Schedule, "Retrying automatically", tint = MaterialTheme.colorScheme.tertiary)
                 DocumentRecord.STATUS_REVIEW -> Icon(Icons.Default.WarningAmber, "Needs review", tint = MaterialTheme.colorScheme.error)
                 else -> Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -831,6 +901,15 @@ private fun DocumentCard(
 @Composable
 private fun DocumentDetailScreen(document: DocumentRecord, viewModel: ScribitViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
+    val activelyProcessing = document.status == DocumentRecord.STATUS_QUEUED ||
+        document.status == DocumentRecord.STATUS_PROCESSING ||
+        document.status == DocumentRecord.STATUS_RETRYING
+    LaunchedEffect(document.id, activelyProcessing) {
+        while (activelyProcessing) {
+            delay(2000)
+            viewModel.refresh()
+        }
+    }
     var editMode by remember(document.id, document.status) { mutableStateOf(document.status == DocumentRecord.STATUS_REVIEW) }
     var title by remember(document.id, document.title) { mutableStateOf(document.title.ifBlank { document.originalName.substringBeforeLast('.') }) }
     var category by remember(document.id, document.category) { mutableStateOf(document.category) }
@@ -868,7 +947,45 @@ private fun DocumentDetailScreen(document: DocumentRecord, viewModel: ScribitVie
             }
         }
 
-        if (document.status == DocumentRecord.STATUS_REVIEW || document.errorMessage.isNotBlank()) {
+        if (document.status == DocumentRecord.STATUS_QUEUED ||
+            document.status == DocumentRecord.STATUS_PROCESSING ||
+            document.status == DocumentRecord.STATUS_RETRYING
+        ) {
+            item {
+                Surface(shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (document.status == DocumentRecord.STATUS_PROCESSING) {
+                            CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.Schedule, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                when (document.status) {
+                                    DocumentRecord.STATUS_QUEUED -> "Waiting in the AI queue"
+                                    DocumentRecord.STATUS_RETRYING -> "Automatic retry scheduled"
+                                    else -> "Scribit is analysing this document"
+                                },
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Text(
+                                when (document.status) {
+                                    DocumentRecord.STATUS_RETRYING -> retryDescription(document)
+                                    DocumentRecord.STATUS_QUEUED -> "No action needed. Scribit processes documents one at a time to avoid API bursts."
+                                    else -> "This finishes in the background; you can leave the app."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (document.status == DocumentRecord.STATUS_REVIEW || document.status == DocumentRecord.STATUS_ERROR) {
             item {
                 Surface(shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.errorContainer) {
                     Column(Modifier.padding(16.dp)) {

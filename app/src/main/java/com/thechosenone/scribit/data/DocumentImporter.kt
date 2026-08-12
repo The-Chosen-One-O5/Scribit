@@ -3,15 +3,10 @@ package com.thechosenone.scribit.data
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
-import androidx.work.Constraints
-import androidx.work.Data
-import androidx.work.NetworkType
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
-import com.thechosenone.scribit.worker.DocumentProcessWorker
 import java.io.File
 import java.util.UUID
 import java.security.MessageDigest
+import com.thechosenone.scribit.worker.DocumentProcessingQueue
 
 class DuplicateDocumentException(
     val existingDocument: DocumentRecord
@@ -23,7 +18,7 @@ class DocumentImporter(private val context: Context) {
     private val appContext = context.applicationContext
     private val database = DocumentDatabase(appContext)
 
-    fun importUri(uri: Uri): Long {
+    fun importUri(uri: Uri, enqueueAi: Boolean = true): Long {
         val resolver = appContext.contentResolver
         val displayName = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) cursor.getString(0) to cursor.getLong(1) else null
@@ -59,11 +54,16 @@ class DocumentImporter(private val context: Context) {
                 contentHash = contentHash
             )
         )
-        enqueueProcessing(id)
+        if (enqueueAi) enqueueProcessing(id)
         return id
     }
 
-    fun importFile(file: File, originalName: String = file.name, mimeType: String = guessMime(file.name)): Long {
+    fun importFile(
+        file: File,
+        originalName: String = file.name,
+        mimeType: String = guessMime(file.name),
+        enqueueAi: Boolean = true
+    ): Long {
         val archiveDir = File(appContext.filesDir, "archive").apply { mkdirs() }
         val extension = originalName.substringAfterLast('.', "").takeIf { it.length in 1..8 }
         val fileId = UUID.randomUUID().toString()
@@ -89,7 +89,7 @@ class DocumentImporter(private val context: Context) {
                 contentHash = contentHash
             )
         )
-        enqueueProcessing(id)
+        if (enqueueAi) enqueueProcessing(id)
         return id
     }
 
@@ -107,14 +107,7 @@ class DocumentImporter(private val context: Context) {
     }
 
     private fun enqueueProcessing(id: Long) {
-        val constraints = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
-        val work = OneTimeWorkRequestBuilder<DocumentProcessWorker>()
-            .setInputData(Data.Builder().putLong(DocumentProcessWorker.KEY_DOCUMENT_ID, id).build())
-            .setConstraints(constraints)
-            .addTag("document-processing")
-            .addTag("document-$id")
-            .build()
-        WorkManager.getInstance(appContext).enqueue(work)
+        DocumentProcessingQueue.enqueue(appContext, id)
     }
 
     companion object {

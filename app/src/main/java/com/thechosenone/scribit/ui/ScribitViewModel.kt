@@ -4,11 +4,6 @@ import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.work.Constraints
-import androidx.work.Data
-import androidx.work.NetworkType
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
 import com.thechosenone.scribit.ai.AiClassifier
 import com.thechosenone.scribit.data.AppSettings
 import com.thechosenone.scribit.data.BackupManager
@@ -17,7 +12,8 @@ import com.thechosenone.scribit.data.DocumentImporter
 import com.thechosenone.scribit.data.DuplicateDocumentException
 import com.thechosenone.scribit.data.DocumentRecord
 import com.thechosenone.scribit.data.SettingsRepository
-import com.thechosenone.scribit.worker.DocumentProcessWorker
+import com.thechosenone.scribit.data.QueueStats
+import com.thechosenone.scribit.worker.DocumentProcessingQueue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -46,6 +42,8 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
         private set
     var duplicateWarning = androidx.compose.runtime.mutableStateOf<String?>(null)
         private set
+    var queueStats = androidx.compose.runtime.mutableStateOf(QueueStats())
+        private set
 
     init { refresh() }
 
@@ -60,9 +58,11 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
                 else -> db.listRecent()
             }
             val refreshedSelected = selectedDocument.value?.let { db.getById(it.id) }
+            val stats = db.queueStats()
             withContext(Dispatchers.Main) {
                 documents.value = rows
                 selectedDocument.value = refreshedSelected
+                queueStats.value = stats
             }
         }
     }
@@ -86,7 +86,11 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             busy.value = true
             val results = withContext(Dispatchers.IO) {
-                uris.map { uri -> runCatching { importer.importUri(uri) } }
+                uris.map { uri -> runCatching { importer.importUri(uri, enqueueAi = false) } }
+            }
+            val importedIds = results.mapNotNull { it.getOrNull() }
+            if (importedIds.isNotEmpty()) {
+                DocumentProcessingQueue.enqueueBatch(getApplication(), importedIds)
             }
             busy.value = false
             val duplicate = results.mapNotNull { it.exceptionOrNull() as? DuplicateDocumentException }.firstOrNull()
@@ -145,15 +149,14 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun retry(documentId: Long) {
-        val constraints = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
-        val work = OneTimeWorkRequestBuilder<DocumentProcessWorker>()
-            .setInputData(Data.Builder().putLong(DocumentProcessWorker.KEY_DOCUMENT_ID, documentId).build())
-            .setConstraints(constraints)
-            .addTag("document-$documentId")
-            .build()
-        WorkManager.getInstance(getApplication()).enqueue(work)
-        message.value = "Classification queued."
-        refresh()
+        viewModelScope.launch(Dispatchers.IO) {
+            db.markQueued(documentId, "Queued for another AI attempt")
+            DocumentProcessingQueue.enqueue(getApplication(), documentId)
+            withContext(Dispatchers.Main) {
+                message.value = "Classification queued. Scribit will retry automatically if the provider throttles it."
+                refresh()
+            }
+        }
     }
 
     fun saveManual(
@@ -180,7 +183,8 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
 
     fun deleteDocument(document: DocumentRecord) {
         viewModelScope.launch {
-            WorkManager.getInstance(getApplication<Application>()).cancelAllWorkByTag("document-${document.id}")
+            // Do not cancel an item inside the serial WorkManager chain: cancelling a prerequisite can
+            // cancel children behind it. Deleting the DB row makes its queued worker a harmless no-op.
             val deleted = withContext(Dispatchers.IO) { db.deleteDocument(document.id) }
             if (deleted) {
                 if (selectedDocument.value?.id == document.id) selectedDocument.value = null

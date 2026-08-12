@@ -54,6 +54,8 @@ The AI never gets permission to rename, move, overwrite, or delete the original 
 - Track expiry dates and schedule expiry notifications.
 - Choose **System, Light or Dark** appearance.
 - Create a portable **Scribit backup ZIP** and restore it later.
+- Import many documents at once without blasting the API: Scribit uses a **serial background queue**.
+- Automatically recover from normal API **429 rate limits** and temporary network/provider errors.
 
 ## Install
 
@@ -109,6 +111,8 @@ Use whichever route is quickest:
 Scribit calculates the file's SHA-256 hash locally first. If that exact file is already in the library, the import stops immediately and shows a duplicate warning. No AI request is spent on that check.
 
 For a new file, classification is queued through Android WorkManager. Scribit does not keep a terminal, Python process, polling loop, or permanent background service running.
+
+Scribit processes document AI jobs **one at a time** instead of firing a burst of requests when you import a folder. If the provider returns HTTP 429, Scribit pauses that queue and retries automatically. It follows `Retry-After` when the provider sends one; otherwise WorkManager uses exponential backoff. Temporary timeouts and common 5xx provider errors also retry automatically. The document stays visible in the library as **Queued** or **Retrying automatically**, so there is normally nothing to tap.
 
 ### Delete a document
 

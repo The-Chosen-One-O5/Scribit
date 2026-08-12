@@ -22,11 +22,15 @@ data class DocumentRecord(
     val summary: String = "",
     val searchTermsJson: String = "[]",
     val confidence: Double = 0.0,
-    val status: String = STATUS_PROCESSING,
-    val errorMessage: String = ""
+    val status: String = STATUS_QUEUED,
+    val errorMessage: String = "",
+    val retryAt: Long = 0L,
+    val retryCount: Int = 0
 ) {
     companion object {
+        const val STATUS_QUEUED = "queued"
         const val STATUS_PROCESSING = "processing"
+        const val STATUS_RETRYING = "retrying"
         const val STATUS_READY = "ready"
         const val STATUS_REVIEW = "review"
         const val STATUS_ERROR = "error"

@@ -3,6 +3,9 @@ setlocal
 set MSG=%*
 if "%MSG%"=="" set MSG=Update Scribit
 
+REM Clean up the one-time v1.2 migration note if this project was updated by overlaying a patch.
+if exist START_HERE_v1.2.txt del /q START_HERE_v1.2.txt
+
 git add .
 git diff --cached --quiet
 if errorlevel 1 (

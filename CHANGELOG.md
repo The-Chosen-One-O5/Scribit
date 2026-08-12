@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.0
+
+- Replaced bursty per-document AI jobs with one persistent serial processing queue.
+- New imports appear immediately as queued and continue processing in the background.
+- Added automatic retry for HTTP 429 rate limits and temporary provider/network failures.
+- Respects provider `Retry-After` hints when available and uses exponential WorkManager backoff otherwise.
+- Added queued, processing and auto-retrying states in the library and document detail UI.
+- Added a queue status card showing waiting/processing/retrying counts and the next retry time.
+- Queue state survives app closure and device scheduling because it is backed by WorkManager.
+- Added database migration v4 for retry timestamps/counts without deleting existing documents.
+- Deleting a queued document no longer cancels the WorkManager chain behind it; the stale job becomes a safe no-op.
+
 ## 1.2.0
 
 - Switched GitHub releases from temporary debug signing to a permanent release-signing workflow.

@@ -7,6 +7,16 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import org.json.JSONArray
 
+
+data class QueueStats(
+    val queued: Int = 0,
+    val processing: Int = 0,
+    val retrying: Int = 0,
+    val nextRetryAt: Long = 0L
+) {
+    val activeCount: Int get() = queued + processing + retrying
+}
+
 class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db", null, DATABASE_VERSION) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -33,9 +43,11 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
                 summary TEXT NOT NULL DEFAULT '',
                 search_terms_json TEXT NOT NULL DEFAULT '[]',
                 confidence REAL NOT NULL DEFAULT 0,
-                status TEXT NOT NULL DEFAULT 'processing',
+                status TEXT NOT NULL DEFAULT 'queued',
                 error_message TEXT NOT NULL DEFAULT '',
-                metadata_updated_at INTEGER NOT NULL DEFAULT 0
+                metadata_updated_at INTEGER NOT NULL DEFAULT 0,
+                retry_at INTEGER NOT NULL DEFAULT 0,
+                retry_count INTEGER NOT NULL DEFAULT 0
             )
             """.trimIndent()
         )
@@ -71,6 +83,12 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
         if (oldVersion < 3) {
             db.execSQL("ALTER TABLE documents ADD COLUMN metadata_updated_at INTEGER NOT NULL DEFAULT 0")
         }
+        if (oldVersion < 4) {
+            db.execSQL("ALTER TABLE documents ADD COLUMN retry_at INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE documents ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0")
+            // Any interrupted legacy 'processing' row is safe to show as queued after upgrading.
+            db.execSQL("UPDATE documents SET status='queued' WHERE status='processing'")
+        }
     }
 
     @Synchronized
@@ -84,6 +102,8 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
             put("imported_at", record.importedAt)
             put("content_hash", record.contentHash)
             put("status", record.status)
+            put("retry_at", record.retryAt)
+            put("retry_count", record.retryCount)
         }
         val id = writableDatabase.insertOrThrow("documents", null, values)
         upsertFts(getById(id)!!)
@@ -117,6 +137,8 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
             put("status", record.status)
             put("error_message", record.errorMessage)
             put("metadata_updated_at", System.currentTimeMillis())
+            put("retry_at", record.retryAt)
+            put("retry_count", record.retryCount)
         }
         val id = writableDatabase.insertOrThrow("documents", null, values)
         upsertFts(getById(id)!!)
@@ -213,6 +235,8 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
             put("status", if (metadata.needsReview) DocumentRecord.STATUS_REVIEW else DocumentRecord.STATUS_READY)
             put("error_message", "")
             put("metadata_updated_at", System.currentTimeMillis())
+            put("retry_at", 0L)
+            put("retry_count", 0)
         }
         writableDatabase.update("documents", values, "id=?", arrayOf(id.toString()))
         getById(id)?.let(::upsertFts)
@@ -243,9 +267,43 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
             put("status", DocumentRecord.STATUS_READY)
             put("error_message", "")
             put("metadata_updated_at", System.currentTimeMillis())
+            put("retry_at", 0L)
+            put("retry_count", 0)
         }
         writableDatabase.update("documents", values, "id=?", arrayOf(id.toString()))
         getById(id)?.let(::upsertFts)
+    }
+
+    @Synchronized
+    fun markQueued(id: Long, message: String = "Waiting for AI analysis") {
+        val values = ContentValues().apply {
+            put("status", DocumentRecord.STATUS_QUEUED)
+            put("error_message", message.take(1000))
+            put("retry_at", 0L)
+            put("retry_count", 0)
+        }
+        writableDatabase.update("documents", values, "id=?", arrayOf(id.toString()))
+    }
+
+    @Synchronized
+    fun markProcessing(id: Long) {
+        val values = ContentValues().apply {
+            put("status", DocumentRecord.STATUS_PROCESSING)
+            put("error_message", "Analyzing with AI…")
+            put("retry_at", 0L)
+        }
+        writableDatabase.update("documents", values, "id=?", arrayOf(id.toString()))
+    }
+
+    @Synchronized
+    fun markRetrying(id: Long, retryAt: Long, retryCount: Int, message: String) {
+        val values = ContentValues().apply {
+            put("status", DocumentRecord.STATUS_RETRYING)
+            put("error_message", message.take(1000))
+            put("retry_at", retryAt)
+            put("retry_count", retryCount)
+        }
+        writableDatabase.update("documents", values, "id=?", arrayOf(id.toString()))
     }
 
     @Synchronized
@@ -254,8 +312,29 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
             put("status", DocumentRecord.STATUS_REVIEW)
             put("error_message", message.take(1000))
             put("metadata_updated_at", System.currentTimeMillis())
+            put("retry_at", 0L)
         }
         writableDatabase.update("documents", values, "id=?", arrayOf(id.toString()))
+    }
+
+    fun queueStats(): QueueStats {
+        val counts = mutableMapOf<String, Int>()
+        readableDatabase.rawQuery(
+            "SELECT status, COUNT(*) FROM documents WHERE status IN (?,?,?) GROUP BY status",
+            arrayOf(DocumentRecord.STATUS_QUEUED, DocumentRecord.STATUS_PROCESSING, DocumentRecord.STATUS_RETRYING)
+        ).use { cursor ->
+            while (cursor.moveToNext()) counts[cursor.getString(0)] = cursor.getInt(1)
+        }
+        val nextRetry = readableDatabase.rawQuery(
+            "SELECT MIN(retry_at) FROM documents WHERE status=? AND retry_at>0",
+            arrayOf(DocumentRecord.STATUS_RETRYING)
+        ).use { cursor -> if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else 0L }
+        return QueueStats(
+            queued = counts[DocumentRecord.STATUS_QUEUED] ?: 0,
+            processing = counts[DocumentRecord.STATUS_PROCESSING] ?: 0,
+            retrying = counts[DocumentRecord.STATUS_RETRYING] ?: 0,
+            nextRetryAt = nextRetry
+        )
     }
 
     fun getById(id: Long): DocumentRecord? = readableDatabase.query(
@@ -372,11 +451,13 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
         searchTermsJson = getString(getColumnIndexOrThrow("search_terms_json")),
         confidence = getDouble(getColumnIndexOrThrow("confidence")),
         status = getString(getColumnIndexOrThrow("status")),
-        errorMessage = getString(getColumnIndexOrThrow("error_message"))
+        errorMessage = getString(getColumnIndexOrThrow("error_message")),
+        retryAt = getLong(getColumnIndexOrThrow("retry_at")),
+        retryCount = getInt(getColumnIndexOrThrow("retry_count"))
     )
 
     companion object {
-        private const val DATABASE_VERSION = 3
+        private const val DATABASE_VERSION = 4
     }
 
 }

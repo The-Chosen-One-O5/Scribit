@@ -13,10 +13,32 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import kotlin.math.max
 import kotlin.math.roundToInt
+
+
+class ProviderHttpException(
+    val statusCode: Int,
+    message: String,
+    val retryAfterMillis: Long?,
+    val providerCode: String = ""
+) : IOException(message) {
+    val isRateLimited: Boolean get() = statusCode == 429
+    val isRetryable: Boolean
+        get() {
+            val code = providerCode.lowercase()
+            val text = message.orEmpty().lowercase()
+            val looksLikeQuotaExhausted = code.contains("insufficient_quota") ||
+                code.contains("billing") || code.contains("quota_exhausted") ||
+                text.contains("insufficient quota") || text.contains("billing hard limit")
+            return !looksLikeQuotaExhausted && statusCode in setOf(408, 425, 429, 500, 502, 503, 504)
+        }
+}
 
 class AiClassifier(private val context: Context) {
 
@@ -139,10 +161,15 @@ class AiClassifier(private val context: Context) {
             val body = (if (status in 200..299) connection.inputStream else connection.errorStream)
                 ?.bufferedReader()?.use { it.readText() }.orEmpty()
             if (status !in 200..299) {
-                val providerMessage = runCatching {
-                    JSONObject(body).optJSONObject("error")?.optString("message")
-                }.getOrNull()?.takeIf { !it.isNullOrBlank() }
-                error(providerMessage ?: "Provider request failed with HTTP $status")
+                val errorObject = runCatching { JSONObject(body).optJSONObject("error") }.getOrNull()
+                val providerMessage = errorObject?.optString("message")?.takeIf { it.isNotBlank() }
+                val providerCode = errorObject?.optString("code").orEmpty()
+                throw ProviderHttpException(
+                    statusCode = status,
+                    message = providerMessage ?: "Provider request failed with HTTP $status",
+                    retryAfterMillis = parseRetryAfterMillis(connection.getHeaderField("Retry-After")),
+                    providerCode = providerCode
+                )
             }
             val json = JSONObject(body)
             val content = json.optJSONArray("choices")
@@ -163,6 +190,17 @@ class AiClassifier(private val context: Context) {
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun parseRetryAfterMillis(value: String?): Long? {
+        val raw = value?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        raw.toLongOrNull()?.let { seconds ->
+            return (seconds.coerceAtLeast(0L) * 1_000L).coerceAtMost(60L * 60L * 1_000L)
+        }
+        return runCatching {
+            val target = ZonedDateTime.parse(raw, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli()
+            (target - System.currentTimeMillis()).coerceAtLeast(0L).coerceAtMost(60L * 60L * 1_000L)
+        }.getOrNull()
     }
 
     private fun parseMetadata(raw: String, document: DocumentRecord): AiMetadata {
