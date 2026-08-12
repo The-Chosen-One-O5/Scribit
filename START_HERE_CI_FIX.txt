@@ -1,0 +1,11 @@
+Scribit v1.3.1 — GitHub Actions YAML fix
+
+This patch ONLY fixes .github/workflows/build-apk.yml.
+It does not change app code, app version, package ID, database, or signing configuration.
+
+1. Extract this ZIP into your existing Scribit repo folder.
+2. Allow Windows to replace .github/workflows/build-apk.yml.
+3. Run UPDATE_GITHUB.cmd.
+4. GitHub Actions should now parse the workflow and attempt the actual v1.3.1 Android build.
+
+If that run fails later inside Gradle/Kotlin, send the new error; that will be a separate build-stage issue.
