@@ -7,6 +7,7 @@ REM Clean up the one-time v1.2 migration note if this project was updated by ove
 if exist START_HERE_v1.2.txt del /q START_HERE_v1.2.txt
 if exist START_HERE_v1.3.txt del /q START_HERE_v1.3.txt
 if exist START_HERE_v1.3.1.txt del /q START_HERE_v1.3.1.txt
+if exist START_HERE_v1.3.2.txt del /q START_HERE_v1.3.2.txt
 
 git add .
 git diff --cached --quiet
