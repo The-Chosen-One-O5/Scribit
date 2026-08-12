@@ -34,6 +34,8 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
         private set
     var searchQuery = androidx.compose.runtime.mutableStateOf("")
     var categoryFilter = androidx.compose.runtime.mutableStateOf<String?>(null)
+    var categories = androidx.compose.runtime.mutableStateOf<List<String>>(emptyList())
+        private set
     var reviewOnly = androidx.compose.runtime.mutableStateOf(false)
     var busy = androidx.compose.runtime.mutableStateOf(false)
         private set
@@ -56,10 +58,15 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
             }
             val refreshedSelected = selectedDocument.value?.let { db.getById(it.id) }
             val stats = db.queueStats()
+            val availableCategories = db.listCategories()
             withContext(Dispatchers.Main) {
                 documents.value = rows
                 selectedDocument.value = refreshedSelected
                 queueStats.value = stats
+                categories.value = availableCategories
+                if (categoryFilter.value != null && categoryFilter.value !in availableCategories) {
+                    categoryFilter.value = null
+                }
             }
         }
     }
@@ -76,6 +83,44 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
         reviewOnly.value = enabled
         if (enabled) categoryFilter.value = null
         refresh()
+    }
+
+    fun addCategory(name: String) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching { db.addCategory(name) } }
+            result.fold(
+                onSuccess = { created ->
+                    message.value = "Category ‘$created’ added. Scribit AI can use it for future classifications."
+                    refresh()
+                },
+                onFailure = { message.value = it.message ?: "Could not add category." }
+            )
+        }
+    }
+
+    fun deleteCustomCategory(name: String) {
+        viewModelScope.launch {
+            val deleted = withContext(Dispatchers.IO) { db.deleteCustomCategory(name) }
+            if (deleted) {
+                if (categoryFilter.value.equals(name, ignoreCase = true)) categoryFilter.value = null
+                message.value = "Category ‘$name’ removed. Documents were kept."
+                refresh()
+            } else {
+                message.value = "Built-in categories cannot be removed."
+            }
+        }
+    }
+
+    fun setDocumentCategories(documentId: Long, selected: List<String>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            db.setDocumentCategories(documentId, selected)
+            val refreshed = db.getById(documentId)
+            withContext(Dispatchers.Main) {
+                selectedDocument.value = refreshed
+                message.value = "Categories updated."
+                refresh()
+            }
+        }
     }
 
     fun importUris(uris: List<Uri>) {
@@ -177,7 +222,7 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
     fun saveManual(
         id: Long,
         title: String,
-        category: String,
+        categories: List<String>,
         documentType: String,
         organization: String,
         issueDate: String,
@@ -186,7 +231,7 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
         summary: String
     ) {
         viewModelScope.launch(Dispatchers.IO) {
-            db.updateManualMetadata(id, title, category, documentType, organization, issueDate, expiryDate, tags, summary)
+            db.updateManualMetadata(id, title, categories, documentType, organization, issueDate, expiryDate, tags, summary)
             val refreshed = db.getById(id)
             withContext(Dispatchers.Main) {
                 selectedDocument.value = refreshed
@@ -285,7 +330,7 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
             busy.value = true
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val plan = classifier.planSearch(settings.value, query)
+                    val plan = classifier.planSearch(settings.value, query, db.listCategories())
                     if (plan.expiringDays != null) {
                         val today = LocalDate.now()
                         db.expiringWithin(today.toString(), today.plusDays(plan.expiringDays.toLong()).toString())

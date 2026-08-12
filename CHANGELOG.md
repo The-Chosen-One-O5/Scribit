@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.4.2
+
+- Repairs the source-sync/update path so app source cannot silently stay old while only the version number changes.
+- Verifies the exact `app/src` tree pushed to GitHub matches the local source tree before reporting success.
+- Adds a CI source snapshot check so a release is rejected if critical source files do not match the release manifest.
+- Re-ships the complete custom + multi-category UI: Add More, manual multi-category checkboxes, AI multi-category sorting, and legacy Other cleanup.
+
+## 1.4.1
+
+- Repairs the v1.4 category UI rollout so the actual app source is included in the update.
+- Removes the legacy `Other` category from the library and database.
+- Long-pressing a document now opens category checkboxes plus a delete action.
+- Keeps multi-category assignment, custom categories, and AI category selection from v1.4.0.
+
+## 1.4.0
+
+- Replaced the fixed **Other** category with **Add More** so you can create your own categories such as Personal, Travel or Medical.
+- Documents can now belong to **multiple categories at the same time**.
+- AI classification receives the current category list and may assign every category that genuinely applies.
+- Added manual **Manage categories** controls to document editing, so AI categorisation is never permanent or locked.
+- Category filters now match any category assigned to a document.
+- Existing Identity, Education, Career, Finance and Permits assignments migrate automatically during the update.
+- Custom categories and multi-category assignments are included in Scribit backups.
+
 ## 1.3.2
 
 - Reworked duplicate detection so it uses only exact SHA-256 file-content hashes; similar filenames never count as duplicates.

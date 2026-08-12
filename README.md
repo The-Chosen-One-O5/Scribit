@@ -47,7 +47,9 @@ The AI never gets permission to rename, move, overwrite, or delete the original 
 - Search locally with SQLite full-text search.
 - Use **Smart Search** when you remember the idea rather than the exact words.
 - Put uncertain AI results into **Needs Review** instead of quietly pretending they are correct.
-- Edit metadata by hand or re-run classification.
+- Create your own categories with **Add More**; custom categories become available to the AI too.
+- Put one document in **multiple categories** when it belongs in more than one place.
+- Edit metadata and category assignments by hand or re-run classification.
 - Long-press a library item to **delete it from Scribit**. The source file outside Scribit stays untouched.
 - Detect **exact duplicate file contents locally with SHA-256**. Filenames, AI titles and metadata are never used for duplicate detection.
 - Never block or auto-delete a duplicate: exact matches are imported, marked red, and left for you to keep or delete.
@@ -112,6 +114,14 @@ If two files are byte-for-byte identical, Scribit still imports the new copy but
 For a new file, classification is queued through Android WorkManager. Scribit does not keep a terminal, Python process, polling loop, or permanent background service running.
 
 Scribit processes document AI jobs **one at a time** instead of firing a burst of requests when you import a folder. If the provider returns HTTP 429, Scribit pauses that queue and retries automatically. It follows `Retry-After` when the provider sends one; otherwise WorkManager uses exponential backoff. Temporary timeouts and common 5xx provider errors also retry automatically. The document stays visible in the library as **Queued** or **Retrying automatically**, so there is normally nothing to tap.
+
+### Categories
+
+The built-in category bar starts with **Identity, Education, Career, Finance and Permits**. Tap **Add More** to create another category such as Personal, Travel or Medical. There is no forced catch-all Other folder.
+
+A document can belong to several categories at once. For example, a university ID can appear under both **Identity** and **Education**, while an internship certificate can appear under **Education** and **Career**. Scribit gives the AI your current category list during classification, but the final organisation is always yours: open a document, tap **Edit → Manage categories**, then tick or untick anything you want.
+
+**All** and **Needs Review** are filters, not categories.
 
 ### Change the library layout
 

@@ -64,7 +64,7 @@ class AiClassifier(private val context: Context) {
         text.trim()
     }
 
-    fun classify(settings: AppSettings, document: DocumentRecord): AiMetadata {
+    fun classify(settings: AppSettings, document: DocumentRecord, availableCategories: List<String>): AiMetadata {
         require(settings.isConfigured) { "API setup is incomplete." }
         val file = File(document.archivePath)
         require(file.exists()) { "Imported file is missing from the private archive." }
@@ -72,7 +72,7 @@ class AiClassifier(private val context: Context) {
         val userContent = JSONArray().apply {
             put(JSONObject().apply {
                 put("type", "text")
-                put("text", classificationInstruction(document))
+                put("text", classificationInstruction(document, availableCategories))
             })
 
             when {
@@ -114,10 +114,10 @@ class AiClassifier(private val context: Context) {
         }
 
         val response = postChat(settings, payload)
-        return parseMetadata(response, document)
+        return parseMetadata(response, document, availableCategories)
     }
 
-    fun planSearch(settings: AppSettings, query: String): SearchPlan {
+    fun planSearch(settings: AppSettings, query: String, availableCategories: List<String>): SearchPlan {
         require(settings.isConfigured) { "API setup is incomplete." }
         val payload = JSONObject().apply {
             put("model", settings.model)
@@ -126,7 +126,13 @@ class AiClassifier(private val context: Context) {
             put("messages", JSONArray()
                 .put(JSONObject().apply {
                     put("role", "system")
-                    put("content", "Convert a natural-language personal document search into strict JSON only. Schema: {\"keywords\":\"space separated search words\",\"category\":null|\"Identity\"|\"Education\"|\"Career\"|\"Finance\"|\"Permits\"|\"Other\",\"expiring_days\":null|integer}. Do not invent document facts.")
+                    put(
+                        "content",
+                        "Convert a natural-language personal document search into strict JSON only. " +
+                            "Schema: {\"keywords\":\"space separated search words\",\"category\":null|string,\"expiring_days\":null|integer}. " +
+                            "If category is not null it must be exactly one value from this JSON array: ${JSONArray(availableCategories)}. " +
+                            "Do not invent document facts."
+                    )
                 })
                 .put(JSONObject().apply {
                     put("role", "user")
@@ -138,7 +144,9 @@ class AiClassifier(private val context: Context) {
         val obj = JSONObject(raw)
         return SearchPlan(
             keywords = obj.optString("keywords", query).ifBlank { query },
-            category = obj.optString("category", "").takeIf { it.isNotBlank() && it != "null" },
+            category = obj.optString("category", "")
+                .takeIf { it.isNotBlank() && it != "null" }
+                ?.let { requested -> availableCategories.firstOrNull { it.equals(requested, ignoreCase = true) } },
             expiringDays = if (obj.isNull("expiring_days")) null else obj.optInt("expiring_days").takeIf { it > 0 }
         )
     }
@@ -203,18 +211,30 @@ class AiClassifier(private val context: Context) {
         }.getOrNull()
     }
 
-    private fun parseMetadata(raw: String, document: DocumentRecord): AiMetadata {
+    private fun parseMetadata(raw: String, document: DocumentRecord, availableCategories: List<String>): AiMetadata {
         val obj = JSONObject(extractJson(raw))
         val confidence = obj.optDouble("confidence", 0.0).coerceIn(0.0, 1.0)
         val title = obj.optString("title", "").ifBlank { document.originalName.substringBeforeLast('.') }
-        val category = normalizeCategory(obj.optString("category", "Other"))
+        val requested = mutableListOf<String>()
+        val categoryArray = obj.optJSONArray("categories")
+        if (categoryArray != null) {
+            for (i in 0 until categoryArray.length()) {
+                categoryArray.optString(i).takeIf { it.isNotBlank() }?.let(requested::add)
+            }
+        } else {
+            // Accept the old single-category shape from providers that ignored the updated schema.
+            obj.optString("category", "").takeIf { it.isNotBlank() }?.let(requested::add)
+        }
+        val categories = requested.mapNotNull { wanted ->
+            availableCategories.firstOrNull { it.equals(wanted.trim(), ignoreCase = true) }
+        }.distinctBy { it.lowercase() }
         val tags = obj.optJSONArray("tags") ?: JSONArray()
         val identifiers = obj.optJSONArray("identifiers") ?: JSONArray()
         val searchTerms = obj.optJSONArray("search_terms") ?: JSONArray()
         val explicitReview = obj.optBoolean("needs_review", false)
         return AiMetadata(
             title = title.take(180),
-            category = category,
+            categories = categories,
             documentType = obj.optString("document_type", "").take(100),
             organization = obj.optString("organization", "").take(180),
             issueDate = normalizeIsoDate(obj.optString("issue_date", "")),
@@ -226,19 +246,22 @@ class AiClassifier(private val context: Context) {
             summary = obj.optString("summary", "").take(800),
             searchTermsJson = searchTerms.toString(),
             confidence = confidence,
-            needsReview = explicitReview || confidence < 0.72 || title.isBlank()
+            needsReview = explicitReview || confidence < 0.72 || title.isBlank() || categories.isEmpty()
         )
     }
 
-    private fun classificationInstruction(document: DocumentRecord): String = """
+    private fun classificationInstruction(document: DocumentRecord, availableCategories: List<String>): String = """
         Analyze this personal document and return JSON only.
         Original filename: ${document.originalName}
         MIME type: ${document.mimeType}
 
+        Available categories (choose zero, one, or multiple; never invent a category):
+        ${JSONArray(availableCategories)}
+
         Required schema:
         {
           "title": "short human-friendly title",
-          "category": "Identity|Education|Career|Finance|Permits|Other",
+          "categories": ["one or more exact values from the available category list"],
           "document_type": "specific type such as Passport, Marksheet, Bank Statement",
           "organization": "issuer/institution or empty string",
           "issue_date": "YYYY-MM-DD or empty string",
@@ -254,6 +277,9 @@ class AiClassifier(private val context: Context) {
         }
 
         Rules:
+        - A document may belong to multiple categories when that is genuinely useful. Example: a university ID can be both Identity and Education.
+        - Only use category names from the supplied list, exactly as written.
+        - If none of the available categories fit, return an empty categories array and set needs_review=true.
         - Never invent missing dates, IDs, names, institutions, or expiry information.
         - Use empty strings/arrays for unknown fields.
         - If the image is unclear, partial, contradictory, or identity-sensitive details are uncertain, set needs_review=true.
@@ -270,14 +296,6 @@ class AiClassifier(private val context: Context) {
         }
     }
 
-    private fun normalizeCategory(value: String): String = when (value.trim().lowercase()) {
-        "identity", "id" -> "Identity"
-        "education", "academic" -> "Education"
-        "career", "employment", "work" -> "Career"
-        "finance", "financial" -> "Finance"
-        "permit", "permits", "visa", "immigration" -> "Permits"
-        else -> "Other"
-    }
 
     private fun normalizeIsoDate(value: String): String {
         val clean = value.trim()

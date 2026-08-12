@@ -20,6 +20,16 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Verify release source snapshot
+        shell: bash
+        run: sha256sum -c release/source-manifest.sha256
+
+      - name: Verify category feature source is present
+        shell: bash
+        run: |
+          grep -Fq 'Add More' app/src/main/java/com/thechosenone/scribit/ui/ScribitApp.kt
+          grep -Fq 'Manage categories' app/src/main/java/com/thechosenone/scribit/ui/ScribitApp.kt
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:

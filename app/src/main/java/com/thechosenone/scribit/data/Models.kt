@@ -10,7 +10,9 @@ data class DocumentRecord(
     val importedAt: Long,
     val contentHash: String = "",
     val title: String = "",
-    val category: String = "Other",
+    // Kept for backwards-compatible database/backup metadata. The UI uses categories.
+    val category: String = "",
+    val categories: List<String> = emptyList(),
     val documentType: String = "",
     val organization: String = "",
     val issueDate: String = "",
@@ -28,6 +30,9 @@ data class DocumentRecord(
     val retryCount: Int = 0,
     val duplicateWarning: Boolean = false
 ) {
+    val primaryCategory: String
+        get() = categories.firstOrNull().orEmpty()
+
     companion object {
         const val STATUS_QUEUED = "queued"
         const val STATUS_PROCESSING = "processing"
@@ -40,7 +45,7 @@ data class DocumentRecord(
 
 data class AiMetadata(
     val title: String,
-    val category: String,
+    val categories: List<String>,
     val documentType: String,
     val organization: String,
     val issueDate: String,

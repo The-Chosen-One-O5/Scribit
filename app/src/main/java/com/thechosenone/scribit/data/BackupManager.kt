@@ -74,6 +74,10 @@ class BackupManager(context: Context) {
                             .put("theme_mode", settings.themeMode)
                             .put("library_layout", settings.libraryLayout)
                     )
+                    .put(
+                        "custom_categories",
+                        JSONArray(database.listCategories().filterNot { database.isBuiltInCategory(it) })
+                    )
                     .put("documents", manifestDocuments)
 
                 zip.putNextEntry(ZipEntry(MANIFEST_ENTRY))
@@ -126,6 +130,13 @@ class BackupManager(context: Context) {
                     )
                     true
                 } ?: false
+
+                val customCategories = manifest.optJSONArray("custom_categories") ?: JSONArray()
+                for (i in 0 until customCategories.length()) {
+                    customCategories.optString(i).takeIf { it.isNotBlank() }?.let { name ->
+                        runCatching { database.addCategory(name) }
+                    }
+                }
 
                 val archiveDir = File(appContext.filesDir, "archive").apply { mkdirs() }
                 val docs = manifest.optJSONArray("documents") ?: JSONArray()
@@ -185,6 +196,16 @@ class BackupManager(context: Context) {
                             json.optString("error_message")
                         }
 
+                        val restoredCategories = mutableListOf<String>()
+                        val categoryArray = json.optJSONArray("categories")
+                        if (categoryArray != null) {
+                            for (i in 0 until categoryArray.length()) {
+                                categoryArray.optString(i).takeIf { it.isNotBlank() }?.let(restoredCategories::add)
+                            }
+                        } else {
+                            json.optString("category", "").takeIf { it.isNotBlank() && it != "Other" }?.let(restoredCategories::add)
+                        }
+
                         try {
                             database.insertRestored(
                                 DocumentRecord(
@@ -196,7 +217,8 @@ class BackupManager(context: Context) {
                                     importedAt = json.optLong("imported_at", System.currentTimeMillis()),
                                     contentHash = hash,
                                     title = json.optString("title"),
-                                    category = json.optString("category", "Other").ifBlank { "Other" },
+                                    category = restoredCategories.firstOrNull().orEmpty(),
+                                    categories = restoredCategories,
                                     documentType = json.optString("document_type"),
                                     organization = json.optString("organization"),
                                     issueDate = json.optString("issue_date"),
@@ -245,7 +267,8 @@ class BackupManager(context: Context) {
         .put("imported_at", document.importedAt)
         .put("content_hash", document.contentHash)
         .put("title", document.title)
-        .put("category", document.category)
+        .put("category", document.primaryCategory)
+        .put("categories", JSONArray(document.categories))
         .put("document_type", document.documentType)
         .put("organization", document.organization)
         .put("issue_date", document.issueDate)
@@ -279,7 +302,7 @@ class BackupManager(context: Context) {
     }
 
     companion object {
-        const val BACKUP_VERSION = 2
+        const val BACKUP_VERSION = 3
         private const val BACKUP_FORMAT = "scribit-backup"
         private const val MANIFEST_ENTRY = "manifest.json"
     }

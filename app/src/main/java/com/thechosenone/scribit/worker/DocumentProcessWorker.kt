@@ -60,7 +60,7 @@ class DocumentProcessWorker(
         document = db.getById(id) ?: return@withContext Result.success()
 
         try {
-            val metadata = AiClassifier(applicationContext).classify(settings, document)
+            val metadata = AiClassifier(applicationContext).classify(settings, document, db.listCategories())
             // The document may have been deleted while an API request was in flight.
             if (db.getById(id) != null) db.updateAiMetadata(id, metadata)
             Result.success()

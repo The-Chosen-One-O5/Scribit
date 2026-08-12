@@ -550,9 +550,53 @@ private fun HomeScreen(
     val category by viewModel.categoryFilter
     val reviewOnly by viewModel.reviewOnly
     val queueStats by viewModel.queueStats
+    val availableCategories by viewModel.categories
     val libraryLayout = viewModel.settings.value.libraryLayout
     var layoutMenuExpanded by remember { mutableStateOf(false) }
+    var showAddCategory by remember { mutableStateOf(false) }
+    var newCategoryName by remember { mutableStateOf("") }
     var pendingDelete by remember { mutableStateOf<DocumentRecord?>(null) }
+    var pendingManage by remember { mutableStateOf<DocumentRecord?>(null) }
+
+    if (showAddCategory) {
+        AlertDialog(
+            onDismissRequest = { showAddCategory = false; newCategoryName = "" },
+            icon = { Icon(Icons.Default.CreateNewFolder, null) },
+            title = { Text("Add a category", fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text(
+                        "Give it a simple name. Scribit will include it in future AI classifications, and you can assign it by hand too.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = newCategoryName,
+                        onValueChange = { newCategoryName = it.take(32) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Category name") },
+                        placeholder = { Text("Personal") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddCategory = false; newCategoryName = "" }) { Text("Cancel") }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.addCategory(newCategoryName)
+                        showAddCategory = false
+                        newCategoryName = ""
+                    },
+                    enabled = newCategoryName.trim().isNotBlank(),
+                    shape = RoundedCornerShape(14.dp)
+                ) { Text("Add") }
+            }
+        )
+    }
 
     pendingDelete?.let { document ->
         val displayName = document.title.ifBlank { document.originalName }
@@ -580,6 +624,69 @@ private fun HomeScreen(
                     Icon(Icons.Default.Delete, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("Delete")
+                }
+            }
+        )
+    }
+
+    pendingManage?.let { document ->
+        var chosen by remember(document.id, document.categories, availableCategories) {
+            mutableStateOf(document.categories.toSet())
+        }
+        AlertDialog(
+            onDismissRequest = { pendingManage = null },
+            icon = { Icon(Icons.Default.CheckCircle, null) },
+            title = { Text("Manage categories", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        document.title.ifBlank { document.originalName },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    availableCategories.forEach { categoryName ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    chosen = if (categoryName in chosen) chosen - categoryName else chosen + categoryName
+                                }
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = categoryName in chosen,
+                                onCheckedChange = { checked ->
+                                    chosen = if (checked) chosen + categoryName else chosen - categoryName
+                                }
+                            )
+                            Text(categoryName, modifier = Modifier.weight(1f))
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    TextButton(onClick = {
+                        pendingManage = null
+                        pendingDelete = document
+                    }) {
+                        Icon(Icons.Default.DeleteOutline, null, tint = MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Delete document", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingManage = null }) { Text("Cancel") }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.setDocumentCategories(document.id, chosen.toList())
+                    pendingManage = null
+                }) {
+                    Icon(Icons.Default.Check, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Save")
                 }
             }
         )
@@ -728,13 +835,18 @@ private fun HomeScreen(
                             label = { Text("Needs review") },
                             leadingIcon = { Icon(Icons.Default.WarningAmber, null, Modifier.size(16.dp)) }
                         )
-                        listOf("Identity", "Education", "Career", "Finance", "Permits", "Other").forEach { c ->
+                        availableCategories.forEach { c ->
                             FilterChip(
                                 selected = category == c,
                                 onClick = { viewModel.setCategory(if (category == c) null else c) },
                                 label = { Text(c) }
                             )
                         }
+                        AssistChip(
+                            onClick = { showAddCategory = true },
+                            label = { Text("Add More") },
+                            leadingIcon = { Icon(Icons.Default.Add, null, Modifier.size(16.dp)) }
+                        )
                     }
                 }
             }
@@ -751,7 +863,7 @@ private fun HomeScreen(
                                         document = document,
                                         modifier = Modifier.weight(1f),
                                         onClick = { viewModel.select(document) },
-                                        onLongClick = { pendingDelete = document }
+                                        onLongClick = { pendingManage = document }
                                     )
                                 }
                                 if (row.size == 1) Spacer(Modifier.weight(1f))
@@ -763,7 +875,7 @@ private fun HomeScreen(
                             DocumentCompactCard(
                                 document = document,
                                 onClick = { viewModel.select(document) },
-                                onLongClick = { pendingDelete = document }
+                                onLongClick = { pendingManage = document }
                             )
                         }
                     }
@@ -772,7 +884,7 @@ private fun HomeScreen(
                             DocumentCard(
                                 document = document,
                                 onClick = { viewModel.select(document) },
-                                onLongClick = { pendingDelete = document }
+                                onLongClick = { pendingManage = document }
                             )
                         }
                     }
@@ -907,7 +1019,7 @@ private fun DocumentCompactCard(
         Row(Modifier.padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer) {
                 Icon(
-                    categoryIcon(document.category),
+                    categoryIcon(document.primaryCategory),
                     null,
                     Modifier.padding(8.dp).size(18.dp),
                     tint = MaterialTheme.colorScheme.onPrimaryContainer
@@ -916,7 +1028,7 @@ private fun DocumentCompactCard(
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                val subtitle = listOf(document.organization, document.documentType, document.category)
+                val subtitle = listOf(document.organization, document.documentType, categorySummary(document))
                     .firstOrNull { it.isNotBlank() }.orEmpty()
                 if (subtitle.isNotBlank()) {
                     Text(
@@ -958,7 +1070,7 @@ private fun DocumentGridCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.primaryContainer) {
                     Icon(
-                        categoryIcon(document.category),
+                        categoryIcon(document.primaryCategory),
                         null,
                         Modifier.padding(10.dp).size(22.dp),
                         tint = MaterialTheme.colorScheme.onPrimaryContainer
@@ -975,7 +1087,7 @@ private fun DocumentGridCard(
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(4.dp))
-            val subtitle = listOf(document.organization, document.documentType, document.category)
+            val subtitle = listOf(document.organization, document.documentType, categorySummary(document))
                 .firstOrNull { it.isNotBlank() }.orEmpty()
             if (subtitle.isNotBlank()) {
                 Text(
@@ -1041,7 +1153,7 @@ private fun DocumentCard(
         Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primaryContainer) {
                 Icon(
-                    categoryIcon(document.category),
+                    categoryIcon(document.primaryCategory),
                     null,
                     Modifier.padding(12.dp).size(22.dp),
                     tint = MaterialTheme.colorScheme.onPrimaryContainer
@@ -1050,7 +1162,7 @@ private fun DocumentCard(
             Spacer(Modifier.width(13.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                val subtitle = listOf(document.organization, document.documentType, document.category)
+                val subtitle = listOf(document.organization, document.documentType, categorySummary(document))
                     .firstOrNull { it.isNotBlank() }.orEmpty()
                 if (subtitle.isNotBlank()) {
                     Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, maxLines = 1)
@@ -1103,15 +1215,66 @@ private fun DocumentDetailScreen(document: DocumentRecord, viewModel: ScribitVie
             viewModel.refresh()
         }
     }
+    val availableCategories by viewModel.categories
     var editMode by remember(document.id, document.status) { mutableStateOf(document.status == DocumentRecord.STATUS_REVIEW) }
     var title by remember(document.id, document.title) { mutableStateOf(document.title.ifBlank { document.originalName.substringBeforeLast('.') }) }
-    var category by remember(document.id, document.category) { mutableStateOf(document.category) }
+    var selectedCategories by remember(document.id, document.categories) { mutableStateOf(document.categories.toSet()) }
+    var showCategoryPicker by remember(document.id) { mutableStateOf(false) }
     var type by remember(document.id, document.documentType) { mutableStateOf(document.documentType) }
     var organization by remember(document.id, document.organization) { mutableStateOf(document.organization) }
     var issueDate by remember(document.id, document.issueDate) { mutableStateOf(document.issueDate) }
     var expiryDate by remember(document.id, document.expiryDate) { mutableStateOf(document.expiryDate) }
     var tags by remember(document.id, document.tagsJson) { mutableStateOf(jsonTags(document.tagsJson)) }
     var summary by remember(document.id, document.summary) { mutableStateOf(document.summary) }
+
+    if (showCategoryPicker) {
+        AlertDialog(
+            onDismissRequest = { showCategoryPicker = false },
+            icon = { Icon(Icons.Default.Category, null) },
+            title = { Text("Choose categories", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(Modifier.heightIn(max = 430.dp)) {
+                    Text(
+                        "A document can belong to more than one category.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    availableCategories.forEach { categoryName ->
+                        val checked = categoryName in selectedCategories
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    selectedCategories = if (checked) selectedCategories - categoryName else selectedCategories + categoryName
+                                }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = checked,
+                                onCheckedChange = { isChecked ->
+                                    selectedCategories = if (isChecked) selectedCategories + categoryName else selectedCategories - categoryName
+                                }
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Icon(categoryIcon(categoryName), null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(9.dp))
+                            Text(categoryName, modifier = Modifier.weight(1f))
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Need a new one? Use Add More in the Library first, then it will appear here and AI can use it too.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = { showCategoryPicker = false }, shape = RoundedCornerShape(14.dp)) { Text("Done") }
+            }
+        )
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -1125,7 +1288,7 @@ private fun DocumentDetailScreen(document: DocumentRecord, viewModel: ScribitVie
                 }
                 Spacer(Modifier.width(12.dp))
                 Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-                    Icon(categoryIcon(document.category), null, Modifier.padding(11.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Icon(categoryIcon(document.primaryCategory), null, Modifier.padding(11.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
@@ -1238,7 +1401,11 @@ private fun DocumentDetailScreen(document: DocumentRecord, viewModel: ScribitVie
                 Spacer(Modifier.height(12.dp))
                 EditField("Title", title, editMode) { title = it }
                 Spacer(Modifier.height(10.dp))
-                EditField("Category", category, editMode) { category = it }
+                CategoryField(
+                    selected = selectedCategories.toList(),
+                    editMode = editMode,
+                    onManage = { showCategoryPicker = true }
+                )
                 Spacer(Modifier.height(10.dp))
                 EditField("Document type", type, editMode) { type = it }
                 Spacer(Modifier.height(10.dp))
@@ -1271,7 +1438,7 @@ private fun DocumentDetailScreen(document: DocumentRecord, viewModel: ScribitVie
                 Button(
                     onClick = {
                         if (editMode) {
-                            viewModel.saveManual(document.id, title, category, type, organization, issueDate, expiryDate, tags, summary)
+                            viewModel.saveManual(document.id, title, selectedCategories.toList(), type, organization, issueDate, expiryDate, tags, summary)
                             editMode = false
                         } else {
                             val file = File(document.archivePath)
@@ -1305,6 +1472,42 @@ private fun DocumentDetailScreen(document: DocumentRecord, viewModel: ScribitVie
 }
 
 @Composable
+private fun CategoryField(
+    selected: List<String>,
+    editMode: Boolean,
+    onManage: () -> Unit
+) {
+    Text("Categories", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Spacer(Modifier.height(6.dp))
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (selected.isEmpty()) {
+            AssistChip(onClick = {}, enabled = false, label = { Text("Uncategorized") })
+        } else {
+            selected.forEach { category ->
+                AssistChip(
+                    onClick = {},
+                    enabled = false,
+                    label = { Text(category) },
+                    leadingIcon = { Icon(categoryIcon(category), null, Modifier.size(16.dp)) }
+                )
+            }
+        }
+    }
+    if (editMode) {
+        Spacer(Modifier.height(7.dp))
+        OutlinedButton(onClick = onManage, shape = RoundedCornerShape(14.dp)) {
+            Icon(Icons.Default.Category, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(7.dp))
+            Text("Manage categories")
+        }
+    }
+}
+
+@Composable
 private fun DetailLine(label: String, value: String) {
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Text(label, modifier = Modifier.weight(0.38f), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1325,6 +1528,9 @@ private fun EditField(label: String, value: String, enabled: Boolean, minLines: 
         shape = RoundedCornerShape(17.dp)
     )
 }
+
+private fun categorySummary(document: DocumentRecord): String =
+    document.categories.joinToString(" · ").ifBlank { "Uncategorized" }
 
 private fun categoryIcon(category: String) = when (category) {
     "Identity" -> Icons.Default.Badge
