@@ -72,6 +72,7 @@ class BackupManager(context: Context) {
                             .put("model", settings.model)
                             .put("supports_vision", settings.supportsVision)
                             .put("theme_mode", settings.themeMode)
+                            .put("library_layout", settings.libraryLayout)
                     )
                     .put("documents", manifestDocuments)
 
@@ -120,7 +121,8 @@ class BackupManager(context: Context) {
                         apiBaseUrl = settings.optString("api_base_url"),
                         model = settings.optString("model"),
                         supportsVision = settings.optBoolean("supports_vision", true),
-                        themeMode = settings.optString("theme_mode", AppSettings.THEME_SYSTEM)
+                        themeMode = settings.optString("theme_mode", AppSettings.THEME_SYSTEM),
+                        libraryLayout = settings.optString("library_layout", AppSettings.LAYOUT_LIST)
                     )
                     true
                 } ?: false

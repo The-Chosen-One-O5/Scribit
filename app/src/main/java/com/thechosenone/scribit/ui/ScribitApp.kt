@@ -362,7 +362,8 @@ private fun SetupScreen(
                     apiKey = apiKey.trim(),
                     model = model.trim(),
                     supportsVision = vision,
-                    themeMode = initial.themeMode
+                    themeMode = initial.themeMode,
+                    libraryLayout = initial.libraryLayout
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedButton(
@@ -582,6 +583,8 @@ private fun HomeScreen(
     val category by viewModel.categoryFilter
     val reviewOnly by viewModel.reviewOnly
     val queueStats by viewModel.queueStats
+    val libraryLayout = viewModel.settings.value.libraryLayout
+    var layoutMenuExpanded by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<DocumentRecord?>(null) }
 
     pendingDelete?.let { document ->
@@ -701,6 +704,50 @@ private fun HomeScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Library", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                         Text("${documents.size} shown", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.width(8.dp))
+                        Box {
+                            Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                                IconButton(onClick = { layoutMenuExpanded = true }) {
+                                    Icon(
+                                        when (libraryLayout) {
+                                            AppSettings.LAYOUT_GRID -> Icons.Default.GridView
+                                            AppSettings.LAYOUT_COMPACT -> Icons.Default.Reorder
+                                            else -> Icons.Default.ViewList
+                                        },
+                                        contentDescription = "Change library layout"
+                                    )
+                                }
+                            }
+                            DropdownMenu(
+                                expanded = layoutMenuExpanded,
+                                onDismissRequest = { layoutMenuExpanded = false }
+                            ) {
+                                LibraryLayoutMenuItem(
+                                    label = "List",
+                                    icon = Icons.Default.ViewList,
+                                    selected = libraryLayout == AppSettings.LAYOUT_LIST
+                                ) {
+                                    viewModel.setLibraryLayout(AppSettings.LAYOUT_LIST)
+                                    layoutMenuExpanded = false
+                                }
+                                LibraryLayoutMenuItem(
+                                    label = "Compact",
+                                    icon = Icons.Default.Reorder,
+                                    selected = libraryLayout == AppSettings.LAYOUT_COMPACT
+                                ) {
+                                    viewModel.setLibraryLayout(AppSettings.LAYOUT_COMPACT)
+                                    layoutMenuExpanded = false
+                                }
+                                LibraryLayoutMenuItem(
+                                    label = "Grid",
+                                    icon = Icons.Default.GridView,
+                                    selected = libraryLayout == AppSettings.LAYOUT_GRID
+                                ) {
+                                    viewModel.setLibraryLayout(AppSettings.LAYOUT_GRID)
+                                    layoutMenuExpanded = false
+                                }
+                            }
+                        }
                     }
                     Spacer(Modifier.height(8.dp))
                     Row(
@@ -728,12 +775,40 @@ private fun HomeScreen(
             if (documents.isEmpty()) {
                 item { EmptyLibrary(onImport, onScan) }
             } else {
-                items(documents, key = { it.id }) { document ->
-                    DocumentCard(
-                        document = document,
-                        onClick = { viewModel.select(document) },
-                        onLongClick = { pendingDelete = document }
-                    )
+                when (libraryLayout) {
+                    AppSettings.LAYOUT_GRID -> {
+                        items(documents.chunked(2), key = { row -> row.joinToString("-") { it.id.toString() } }) { row ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                row.forEach { document ->
+                                    DocumentGridCard(
+                                        document = document,
+                                        modifier = Modifier.weight(1f),
+                                        onClick = { viewModel.select(document) },
+                                        onLongClick = { pendingDelete = document }
+                                    )
+                                }
+                                if (row.size == 1) Spacer(Modifier.weight(1f))
+                            }
+                        }
+                    }
+                    AppSettings.LAYOUT_COMPACT -> {
+                        items(documents, key = { it.id }) { document ->
+                            DocumentCompactCard(
+                                document = document,
+                                onClick = { viewModel.select(document) },
+                                onLongClick = { pendingDelete = document }
+                            )
+                        }
+                    }
+                    else -> {
+                        items(documents, key = { it.id }) { document ->
+                            DocumentCard(
+                                document = document,
+                                onClick = { viewModel.select(document) },
+                                onLongClick = { pendingDelete = document }
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -828,6 +903,140 @@ private fun EmptyLibrary(onImport: () -> Unit, onScan: () -> Unit) {
                 OutlinedButton(onClick = onScan, shape = RoundedCornerShape(16.dp)) { Text("Scan") }
             }
         }
+    }
+}
+
+@Composable
+private fun LibraryLayoutMenuItem(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    DropdownMenuItem(
+        text = { Text(label, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal) },
+        leadingIcon = { Icon(icon, null) },
+        trailingIcon = { if (selected) Icon(Icons.Default.Check, "Selected", Modifier.size(18.dp)) },
+        onClick = onClick
+    )
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun DocumentCompactCard(
+    document: DocumentRecord,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
+    val title = document.title.ifBlank { document.originalName }
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp
+    ) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                Icon(
+                    categoryIcon(document.category),
+                    null,
+                    Modifier.padding(8.dp).size(18.dp),
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val subtitle = listOf(document.organization, document.documentType, document.category)
+                    .firstOrNull { it.isNotBlank() }.orEmpty()
+                if (subtitle.isNotBlank()) {
+                    Text(
+                        subtitle,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            DocumentStatusIcon(document)
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun DocumentGridCard(
+    document: DocumentRecord,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
+    val title = document.title.ifBlank { document.originalName }
+    Surface(
+        modifier = modifier
+            .heightIn(min = 158.dp)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        shape = RoundedCornerShape(22.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp,
+        shadowElevation = 1.dp
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                    Icon(
+                        categoryIcon(document.category),
+                        null,
+                        Modifier.padding(10.dp).size(22.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                DocumentStatusIcon(document)
+            }
+            Spacer(Modifier.height(13.dp))
+            Text(
+                title,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(4.dp))
+            val subtitle = listOf(document.organization, document.documentType, document.category)
+                .firstOrNull { it.isNotBlank() }.orEmpty()
+            if (subtitle.isNotBlank()) {
+                Text(
+                    subtitle,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            when (document.status) {
+                DocumentRecord.STATUS_QUEUED -> Text("Queued", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                DocumentRecord.STATUS_PROCESSING -> Text("Analysing…", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                DocumentRecord.STATUS_RETRYING -> Text("Auto-retrying", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelSmall)
+                else -> if (document.expiryDate.isNotBlank()) {
+                    Text("Expires ${document.expiryDate}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DocumentStatusIcon(document: DocumentRecord) {
+    when (document.status) {
+        DocumentRecord.STATUS_PROCESSING -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        DocumentRecord.STATUS_QUEUED -> Icon(Icons.Default.Schedule, "Queued", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+        DocumentRecord.STATUS_RETRYING -> Icon(Icons.Default.Schedule, "Retrying automatically", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.tertiary)
+        DocumentRecord.STATUS_REVIEW -> Icon(Icons.Default.WarningAmber, "Needs review", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.error)
+        else -> Unit
     }
 }
 

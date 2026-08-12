@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.1
+
+- Added persistent library layout switching from the Library header.
+- Added comfortable List, denser Compact, and two-column Grid views.
+- The selected layout is remembered across app restarts and included in portable Scribit backups.
+- Long-press delete, queue/retry status, search filters and document opening work in every layout.
+
 ## 1.3.0
 
 - Replaced bursty per-document AI jobs with one persistent serial processing queue.

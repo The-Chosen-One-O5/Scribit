@@ -59,7 +59,8 @@ data class AppSettings(
     val apiKey: String,
     val model: String,
     val supportsVision: Boolean,
-    val themeMode: String = THEME_SYSTEM
+    val themeMode: String = THEME_SYSTEM,
+    val libraryLayout: String = LAYOUT_LIST
 ) {
     val isConfigured: Boolean
         get() = apiBaseUrl.isNotBlank() && apiKey.isNotBlank() && model.isNotBlank()
@@ -68,5 +69,9 @@ data class AppSettings(
         const val THEME_SYSTEM = "system"
         const val THEME_LIGHT = "light"
         const val THEME_DARK = "dark"
+
+        const val LAYOUT_LIST = "list"
+        const val LAYOUT_COMPACT = "compact"
+        const val LAYOUT_GRID = "grid"
     }
 }

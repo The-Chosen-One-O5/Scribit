@@ -136,6 +136,15 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
         settings.value = settingsRepo.get()
     }
 
+    fun setLibraryLayout(layout: String) {
+        val safeLayout = layout.takeIf {
+            it == AppSettings.LAYOUT_LIST || it == AppSettings.LAYOUT_COMPACT || it == AppSettings.LAYOUT_GRID
+        } ?: AppSettings.LAYOUT_LIST
+        val updated = settings.value.copy(libraryLayout = safeLayout)
+        settingsRepo.save(updated)
+        settings.value = settingsRepo.get()
+    }
+
     fun testSettings(candidate: AppSettings, onResult: (Boolean, String) -> Unit) {
         viewModelScope.launch {
             busy.value = true

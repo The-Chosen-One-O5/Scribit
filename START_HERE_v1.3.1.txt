@@ -1,0 +1,19 @@
+SCRIBIT v1.3.1 — LIBRARY LAYOUTS
+================================
+
+This is a normal signed Scribit update. Do NOT uninstall the current permanently-signed app.
+
+1. Replace your repo files with this patch/full project.
+2. Run UPDATE_GITHUB.cmd.
+3. Wait for GitHub Actions to publish Scribit v1.3.1.
+4. Download Scribit.apk from the v1.3.1 Release.
+5. Open it on your phone and choose Update.
+
+New in 1.3.1:
+- Library view switcher beside the document count.
+- List view.
+- Compact view.
+- Two-column Grid view.
+- Scribit remembers the chosen layout.
+
+Package ID and permanent signing system are unchanged, so a signed v1.2/v1.3 install should update normally and keep app data.
