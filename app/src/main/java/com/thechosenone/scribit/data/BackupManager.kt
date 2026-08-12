@@ -129,6 +129,11 @@ class BackupManager(context: Context) {
 
                 val archiveDir = File(appContext.filesDir, "archive").apply { mkdirs() }
                 val docs = manifest.optJSONArray("documents") ?: JSONArray()
+                val backupFileIds = mutableSetOf<String>()
+                for (i in 0 until docs.length()) {
+                    val fileId = docs.optJSONObject(i)?.optString("file_id").orEmpty()
+                    if (fileId.isNotBlank()) backupFileIds += fileId
+                }
                 var restored = 0
                 var duplicates = 0
                 var missing = 0
@@ -148,17 +153,22 @@ class BackupManager(context: Context) {
                             temporary.outputStream().use { output -> input.copyTo(output) }
                         }
                         val hash = sha256(temporary)
-                        if (database.findDuplicateByHash(hash) != null) {
+                        val backedUpFileId = json.optString("file_id").trim()
+                        if (backedUpFileId.isNotBlank() && database.getByFileId(backedUpFileId) != null) {
+                            // Restoring the same backup twice should not clone the exact same archive record.
                             duplicates++
                             continue
                         }
+
+                        val existingByHash = database.findDuplicateByHash(hash)
+                        val collisionOutsideThisBackup = existingByHash != null && existingByHash.fileId !in backupFileIds
 
                         val originalName = json.optString("original_name").ifBlank { "restored-document" }
                         val extension = originalName.substringAfterLast('.', "")
                             .takeIf { it.length in 1..10 }
                             ?.let { ".$it" }
                             .orEmpty()
-                        val newFileId = UUID.randomUUID().toString()
+                        val newFileId = backedUpFileId.ifBlank { UUID.randomUUID().toString() }
                         val destination = File(archiveDir, "$newFileId$extension")
                         temporary.copyTo(destination, overwrite = false)
 
@@ -199,9 +209,11 @@ class BackupManager(context: Context) {
                                     searchTermsJson = validJsonArray(json.optString("search_terms_json", "[]")),
                                     confidence = json.optDouble("confidence", 0.0).coerceIn(0.0, 1.0),
                                     status = safeStatus,
-                                    errorMessage = restoredError
+                                    errorMessage = restoredError,
+                                    duplicateWarning = json.optBoolean("duplicate_warning", false) || collisionOutsideThisBackup
                                 )
                             )
+                            if (collisionOutsideThisBackup) database.flagDuplicateGroup(hash)
                             restored++
                         } catch (t: Throwable) {
                             destination.delete()
@@ -226,6 +238,7 @@ class BackupManager(context: Context) {
 
     private fun documentToJson(document: DocumentRecord, archiveEntry: String): JSONObject = JSONObject()
         .put("archive_entry", archiveEntry)
+        .put("file_id", document.fileId)
         .put("original_name", document.originalName)
         .put("mime_type", document.mimeType)
         .put("size_bytes", document.sizeBytes)
@@ -246,6 +259,7 @@ class BackupManager(context: Context) {
         .put("confidence", document.confidence)
         .put("status", document.status)
         .put("error_message", document.errorMessage)
+        .put("duplicate_warning", document.duplicateWarning)
 
     private fun validJsonArray(value: String): String = runCatching {
         JSONArray(value).toString()
@@ -265,7 +279,7 @@ class BackupManager(context: Context) {
     }
 
     companion object {
-        const val BACKUP_VERSION = 1
+        const val BACKUP_VERSION = 2
         private const val BACKUP_FORMAT = "scribit-backup"
         private const val MANIFEST_ENTRY = "manifest.json"
     }

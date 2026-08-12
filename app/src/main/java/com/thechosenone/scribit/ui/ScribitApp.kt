@@ -94,7 +94,6 @@ fun ScribitApp(
     val settings by viewModel.settings
     val selected by viewModel.selectedDocument
     val message by viewModel.message
-    val duplicateWarning by viewModel.duplicateWarning
     var showSettings by remember { mutableStateOf(false) }
     val snackbarHost = remember { SnackbarHostState() }
 
@@ -125,35 +124,6 @@ fun ScribitApp(
                 snackbarHost.showSnackbar(it)
                 viewModel.consumeMessage()
             }
-        }
-
-        if (duplicateWarning != null) {
-            AlertDialog(
-                onDismissRequest = { viewModel.dismissDuplicateWarning() },
-                icon = { Icon(Icons.Default.ErrorOutline, null, tint = MaterialTheme.colorScheme.error) },
-                title = {
-                    Text(
-                        "Duplicate document",
-                        color = MaterialTheme.colorScheme.error,
-                        fontWeight = FontWeight.Bold
-                    )
-                },
-                text = {
-                    Text(
-                        duplicateWarning ?: "This exact file is already in Scribit.",
-                        color = MaterialTheme.colorScheme.onErrorContainer
-                    )
-                },
-                confirmButton = {
-                    Button(
-                        onClick = { viewModel.dismissDuplicateWarning() },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                    ) {
-                        Text("Got it")
-                    }
-                },
-                containerColor = MaterialTheme.colorScheme.errorContainer
-            )
         }
 
         Scaffold(
@@ -482,9 +452,6 @@ private fun SetupScreen(
                         )
                     }
                 }
-                Spacer(Modifier.height(10.dp))
-                DetailLine("Package", BuildConfig.APPLICATION_ID)
-                DetailLine("Backup format", "v1")
             }
         }
 
@@ -934,7 +901,7 @@ private fun DocumentCompactCard(
             .fillMaxWidth()
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface,
+        color = if (document.duplicateWarning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surface,
         tonalElevation = 1.dp
     ) {
         Row(Modifier.padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -960,6 +927,9 @@ private fun DocumentCompactCard(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                if (document.duplicateWarning) {
+                    Text("Exact duplicate", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                }
             }
             DocumentStatusIcon(document)
         }
@@ -980,7 +950,7 @@ private fun DocumentGridCard(
             .heightIn(min = 158.dp)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         shape = RoundedCornerShape(22.dp),
-        color = MaterialTheme.colorScheme.surface,
+        color = if (document.duplicateWarning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surface,
         tonalElevation = 1.dp,
         shadowElevation = 1.dp
     ) {
@@ -1017,6 +987,10 @@ private fun DocumentGridCard(
                 )
             }
             Spacer(Modifier.height(10.dp))
+            if (document.duplicateWarning) {
+                Text("Exact duplicate · review", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(3.dp))
+            }
             when (document.status) {
                 DocumentRecord.STATUS_QUEUED -> Text("Queued", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
                 DocumentRecord.STATUS_PROCESSING -> Text("Analysing…", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
@@ -1031,6 +1005,10 @@ private fun DocumentGridCard(
 
 @Composable
 private fun DocumentStatusIcon(document: DocumentRecord) {
+    if (document.duplicateWarning) {
+        Icon(Icons.Default.ErrorOutline, "Exact duplicate", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.error)
+        return
+    }
     when (document.status) {
         DocumentRecord.STATUS_PROCESSING -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
         DocumentRecord.STATUS_QUEUED -> Icon(Icons.Default.Schedule, "Queued", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
@@ -1056,7 +1034,7 @@ private fun DocumentCard(
                 onLongClick = onLongClick
             ),
         shape = RoundedCornerShape(22.dp),
-        color = MaterialTheme.colorScheme.surface,
+        color = if (document.duplicateWarning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surface,
         tonalElevation = 1.dp,
         shadowElevation = 1.dp
     ) {
@@ -1077,6 +1055,10 @@ private fun DocumentCard(
                 if (subtitle.isNotBlank()) {
                     Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, maxLines = 1)
                 }
+                if (document.duplicateWarning) {
+                    Spacer(Modifier.height(3.dp))
+                    Text("Exact duplicate · review", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                }
                 if (document.expiryDate.isNotBlank()) {
                     Spacer(Modifier.height(3.dp))
                     Text("Expires ${document.expiryDate}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
@@ -1096,7 +1078,9 @@ private fun DocumentCard(
                     }
                 }
             }
-            when (document.status) {
+            if (document.duplicateWarning) {
+                Icon(Icons.Default.ErrorOutline, "Exact duplicate", tint = MaterialTheme.colorScheme.error)
+            } else when (document.status) {
                 DocumentRecord.STATUS_PROCESSING -> CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
                 DocumentRecord.STATUS_QUEUED -> Icon(Icons.Default.Schedule, "Queued", tint = MaterialTheme.colorScheme.primary)
                 DocumentRecord.STATUS_RETRYING -> Icon(Icons.Default.Schedule, "Retrying automatically", tint = MaterialTheme.colorScheme.tertiary)
@@ -1151,6 +1135,36 @@ private fun DocumentDetailScreen(document: DocumentRecord, viewModel: ScribitVie
                 Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
                     IconButton(onClick = { editMode = !editMode }) {
                         Icon(if (editMode) Icons.Default.Close else Icons.Default.Edit, if (editMode) "Cancel edit" else "Edit")
+                    }
+                }
+            }
+        }
+
+        if (document.duplicateWarning) {
+            item {
+                Surface(shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.errorContainer) {
+                    Column(Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.ErrorOutline, null, tint = MaterialTheme.colorScheme.error)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Exact duplicate detected", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "Another Scribit document has the exact same file contents. Names and AI metadata are not used for this check. Keep this copy if it is intentional, or go back and long-press it to delete it.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Button(
+                            onClick = { viewModel.keepDuplicate(document.id) },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Icon(Icons.Default.Check, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Keep this copy")
+                        }
                     }
                 }
             }

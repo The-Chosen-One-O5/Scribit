@@ -49,8 +49,8 @@ The AI never gets permission to rename, move, overwrite, or delete the original 
 - Put uncertain AI results into **Needs Review** instead of quietly pretending they are correct.
 - Edit metadata by hand or re-run classification.
 - Long-press a library item to **delete it from Scribit**. The source file outside Scribit stays untouched.
-- Detect **exact duplicate files locally with SHA-256** before running AI again.
-- Show a clear red duplicate warning instead of storing the same file twice.
+- Detect **exact duplicate file contents locally with SHA-256**. Filenames, AI titles and metadata are never used for duplicate detection.
+- Never block or auto-delete a duplicate: exact matches are imported, marked red, and left for you to keep or delete.
 - Track expiry dates and schedule expiry notifications.
 - Choose **System, Light or Dark** appearance.
 - Switch the library between **List, Compact and Grid** layouts; Scribit remembers your choice.
@@ -72,9 +72,7 @@ Scribit currently targets Android 8.0 and newer.
 
 ### Updating Scribit
 
-Official GitHub Releases are signed with the same permanent Scribit signing key.
-
-That means normal future updates should be simple:
+Normal Scribit releases support Android's regular in-place update flow:
 
 - Download the newer `Scribit.apk`.
 - Open it.
@@ -83,8 +81,6 @@ That means normal future updates should be simple:
 - Your local Scribit database, settings and archive remain in place.
 
 Do **not** uninstall Scribit just to install a normal update. Uninstalling an Android app removes its private app data.
-
-> Very early Scribit debug builds used temporary debug certificates. Those old builds cannot be upgraded into the permanently signed release line because Android sees them as a different signer. That was a one-time project setup mistake; releases from the permanent signing setup onward use the same key.
 
 ## First launch
 
@@ -109,7 +105,9 @@ Use whichever route is quickest:
 - **Import:** open Scribit → Add document.
 - **Scan:** use the camera button inside Scribit.
 
-Scribit calculates the file's SHA-256 hash locally first. If that exact file is already in the library, the import stops immediately and shows a duplicate warning. No AI request is spent on that check.
+Scribit calculates the file's SHA-256 hash locally. Duplicate detection is based only on the actual file bytes — not filenames, similar titles, AI output, categories, or dates.
+
+If two files are byte-for-byte identical, Scribit still imports the new copy but marks the matching documents red as **Exact duplicate**. Open a flagged document and tap **Keep this copy** if the duplicate is intentional, or long-press it in the library to delete it. Keeping it removes the red warning.
 
 For a new file, classification is queued through Android WorkManager. Scribit does not keep a terminal, Python process, polling loop, or permanent background service running.
 
@@ -166,7 +164,7 @@ You can restore from either:
 - **Settings → Backup & restore → Restore**, or
 - the **Restore Scribit backup** button on the first-launch screen of a fresh installation
 
-Restore merges documents into the current library. Exact file duplicates are skipped using the same local SHA-256 check.
+Restore merges documents into the current library. Restoring the same backup record twice is skipped, while exact-content collisions with other library documents are kept and surfaced with the same red duplicate warning instead of being silently deleted.
 
 The backup format is versioned independently from the SQLite database. Scribit rebuilds its database records from the backup manifest instead of blindly replacing the live database file, which gives future app versions room to migrate their schema safely.
 
@@ -220,30 +218,9 @@ The button at the top of this README always targets:
 /releases/latest/download/Scribit.apk
 ```
 
-### Permanent signing secrets
+### Release signing
 
-The private signing key is **not** stored in this repository.
-
-The repository owner configures these Actions secrets:
-
-- `SCRIBIT_KEYSTORE_BASE64`
-- `SCRIBIT_KEYSTORE_PASSWORD`
-- `SCRIBIT_KEY_ALIAS`
-- `SCRIBIT_KEY_PASSWORD`
-
-The same private keystore must be kept for the lifetime of this package ID:
-
-```text
-com.thechosenone.scribit
-```
-
-The permanent release certificate currently has this public SHA-256 fingerprint:
-
-```text
-04:B1:23:79:C7:4B:DF:26:DE:60:ED:75:3A:31:F9:3A:C4:31:EA:C0:E8:2C:E8:7D:48:AA:7E:5F:47:DE:05:F4
-```
-
-Losing that key means a differently signed APK cannot update phones that already have the signed Scribit release installed.
+Public release APKs are signed by the GitHub Actions workflow using private repository secrets. Signing material is not stored in the repository.
 
 ### Android Studio
 
@@ -262,8 +239,8 @@ For a locally signed `release` build, provide the same four signing values as en
 The app version lives in `gradle.properties`:
 
 ```properties
-scribit.versionName=1.2.0
-scribit.versionCode=3
+scribit.versionName=1.3.2
+scribit.versionCode=6
 ```
 
 For each public release:

@@ -9,7 +9,6 @@ import com.thechosenone.scribit.data.AppSettings
 import com.thechosenone.scribit.data.BackupManager
 import com.thechosenone.scribit.data.DocumentDatabase
 import com.thechosenone.scribit.data.DocumentImporter
-import com.thechosenone.scribit.data.DuplicateDocumentException
 import com.thechosenone.scribit.data.DocumentRecord
 import com.thechosenone.scribit.data.SettingsRepository
 import com.thechosenone.scribit.data.QueueStats
@@ -39,8 +38,6 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
     var busy = androidx.compose.runtime.mutableStateOf(false)
         private set
     var message = androidx.compose.runtime.mutableStateOf<String?>(null)
-        private set
-    var duplicateWarning = androidx.compose.runtime.mutableStateOf<String?>(null)
         private set
     var queueStats = androidx.compose.runtime.mutableStateOf(QueueStats())
         private set
@@ -93,12 +90,16 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
                 DocumentProcessingQueue.enqueueBatch(getApplication(), importedIds)
             }
             busy.value = false
-            val duplicate = results.mapNotNull { it.exceptionOrNull() as? DuplicateDocumentException }.firstOrNull()
-            val errors = results.mapNotNull { it.exceptionOrNull() }.filterNot { it is DuplicateDocumentException }
-            val importedCount = results.count { it.isSuccess }
+            val errors = results.mapNotNull { it.exceptionOrNull() }
+            val importedCount = importedIds.size
+            val duplicateCount = withContext(Dispatchers.IO) {
+                importedIds.count { id -> db.getById(id)?.duplicateWarning == true }
+            }
             when {
-                duplicate != null -> duplicateWarning.value = duplicate.message
                 errors.isNotEmpty() -> message.value = errors.first().message ?: "Could not import document."
+                importedCount > 0 && duplicateCount > 0 -> message.value =
+                    "Imported $importedCount document${if (importedCount == 1) "" else "s"}. " +
+                        "$duplicateCount exact duplicate${if (duplicateCount == 1) " is" else "s are"} marked in red."
                 importedCount > 0 -> message.value = "Imported $importedCount document${if (importedCount == 1) "" else "s"}."
             }
             refresh()
@@ -108,14 +109,19 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
     fun importCameraFile(file: File) {
         viewModelScope.launch {
             busy.value = true
-            val result = withContext(Dispatchers.IO) { runCatching { importer.importFile(file, "Scan-${System.currentTimeMillis()}.jpg", "image/jpeg") } }
-            busy.value = false
-            val error = result.exceptionOrNull()
-            if (error is DuplicateDocumentException) {
-                duplicateWarning.value = error.message
-            } else {
-                message.value = result.fold({ "Scan imported." }, { it.message ?: "Could not import scan." })
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val id = importer.importFile(file, "Scan-${System.currentTimeMillis()}.jpg", "image/jpeg")
+                    id to (db.getById(id)?.duplicateWarning == true)
+                }
             }
+            busy.value = false
+            message.value = result.fold(
+                onSuccess = { (_, duplicate) ->
+                    if (duplicate) "Scan imported. Exact duplicate marked in red." else "Scan imported."
+                },
+                onFailure = { it.message ?: "Could not import scan." }
+            )
             refresh()
         }
     }
@@ -205,8 +211,16 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun dismissDuplicateWarning() {
-        duplicateWarning.value = null
+    fun keepDuplicate(documentId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            db.dismissDuplicateWarning(documentId)
+            val refreshed = db.getById(documentId)
+            withContext(Dispatchers.Main) {
+                selectedDocument.value = refreshed
+                message.value = "Kept this copy. Duplicate warning removed."
+                refresh()
+            }
+        }
     }
 
     fun exportBackup(destination: Uri) {
@@ -246,9 +260,9 @@ class ScribitViewModel(application: Application) : AndroidViewModel(application)
                         if (restored.restoredCount != 1) append('s')
                         append('.')
                         if (restored.duplicateCount > 0) {
-                            append(" Skipped ${restored.duplicateCount} exact duplicate")
+                            append(" Skipped ${restored.duplicateCount} document")
                             if (restored.duplicateCount != 1) append('s')
-                            append('.')
+                            append(" that were already present.")
                         }
                         if (restored.missingFileCount > 0) {
                             append(" ${restored.missingFileCount} backup file")

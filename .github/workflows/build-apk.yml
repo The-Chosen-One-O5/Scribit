@@ -97,7 +97,7 @@ jobs:
           VERSION_NAME: ${{ steps.version.outputs.name }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
-          NOTES="Signed Android release built automatically from main at commit $GITHUB_SHA. Future Scribit APKs signed with the same private key can update this installation without deleting app data."
+          NOTES="Latest Scribit Android release. See CHANGELOG.md in the repository for what changed in this version."
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists, so this run will not overwrite it."
             echo "The freshly built APK is still available as the Actions artifact."

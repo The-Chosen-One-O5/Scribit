@@ -25,7 +25,8 @@ data class DocumentRecord(
     val status: String = STATUS_QUEUED,
     val errorMessage: String = "",
     val retryAt: Long = 0L,
-    val retryCount: Int = 0
+    val retryCount: Int = 0,
+    val duplicateWarning: Boolean = false
 ) {
     companion object {
         const val STATUS_QUEUED = "queued"

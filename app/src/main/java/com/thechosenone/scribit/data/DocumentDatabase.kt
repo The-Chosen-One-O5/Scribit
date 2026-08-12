@@ -47,7 +47,8 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
                 error_message TEXT NOT NULL DEFAULT '',
                 metadata_updated_at INTEGER NOT NULL DEFAULT 0,
                 retry_at INTEGER NOT NULL DEFAULT 0,
-                retry_count INTEGER NOT NULL DEFAULT 0
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                duplicate_warning INTEGER NOT NULL DEFAULT 0
             )
             """.trimIndent()
         )
@@ -89,6 +90,9 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
             // Any interrupted legacy 'processing' row is safe to show as queued after upgrading.
             db.execSQL("UPDATE documents SET status='queued' WHERE status='processing'")
         }
+        if (oldVersion < 5) {
+            db.execSQL("ALTER TABLE documents ADD COLUMN duplicate_warning INTEGER NOT NULL DEFAULT 0")
+        }
     }
 
     @Synchronized
@@ -104,6 +108,7 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
             put("status", record.status)
             put("retry_at", record.retryAt)
             put("retry_count", record.retryCount)
+            put("duplicate_warning", if (record.duplicateWarning) 1 else 0)
         }
         val id = writableDatabase.insertOrThrow("documents", null, values)
         upsertFts(getById(id)!!)
@@ -139,6 +144,7 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
             put("metadata_updated_at", System.currentTimeMillis())
             put("retry_at", record.retryAt)
             put("retry_count", record.retryCount)
+            put("duplicate_warning", if (record.duplicateWarning) 1 else 0)
         }
         val id = writableDatabase.insertOrThrow("documents", null, values)
         upsertFts(getById(id)!!)
@@ -187,6 +193,34 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
         return null
     }
 
+    /**
+     * Marks every byte-for-byte copy in a duplicate group. Names, titles and AI metadata
+     * are intentionally ignored; only the exact SHA-256 content hash is used.
+     */
+    @Synchronized
+    fun flagDuplicateGroup(contentHash: String): Int {
+        if (contentHash.isBlank()) return 0
+        val count = readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM documents WHERE content_hash=?",
+            arrayOf(contentHash)
+        ).use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else 0 }
+        if (count > 1) {
+            val values = ContentValues().apply { put("duplicate_warning", 1) }
+            writableDatabase.update("documents", values, "content_hash=?", arrayOf(contentHash))
+        }
+        return count
+    }
+
+    @Synchronized
+    fun dismissDuplicateWarning(id: Long) {
+        val values = ContentValues().apply { put("duplicate_warning", 0) }
+        writableDatabase.update("documents", values, "id=?", arrayOf(id.toString()))
+    }
+
+    fun getByFileId(fileId: String): DocumentRecord? = readableDatabase.query(
+        "documents", null, "file_id=?", arrayOf(fileId), null, null, null
+    ).use { cursor -> if (cursor.moveToFirst()) cursor.toRecord() else null }
+
     @Synchronized
     fun deleteDocument(id: Long): Boolean {
         val record = getById(id) ?: return false
@@ -200,7 +234,20 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
             db.endTransaction()
         }
         runCatching { java.io.File(record.archivePath).delete() }
+        clearWarningIfNoLongerDuplicate(record.contentHash)
         return true
+    }
+
+    private fun clearWarningIfNoLongerDuplicate(contentHash: String) {
+        if (contentHash.isBlank()) return
+        val count = readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM documents WHERE content_hash=?",
+            arrayOf(contentHash)
+        ).use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else 0 }
+        if (count <= 1) {
+            val values = ContentValues().apply { put("duplicate_warning", 0) }
+            writableDatabase.update("documents", values, "content_hash=?", arrayOf(contentHash))
+        }
     }
 
     private fun sha256(file: java.io.File): String {
@@ -453,11 +500,12 @@ class DocumentDatabase(context: Context) : SQLiteOpenHelper(context, "scribit.db
         status = getString(getColumnIndexOrThrow("status")),
         errorMessage = getString(getColumnIndexOrThrow("error_message")),
         retryAt = getLong(getColumnIndexOrThrow("retry_at")),
-        retryCount = getInt(getColumnIndexOrThrow("retry_count"))
+        retryCount = getInt(getColumnIndexOrThrow("retry_count")),
+        duplicateWarning = getInt(getColumnIndexOrThrow("duplicate_warning")) != 0
     )
 
     companion object {
-        private const val DATABASE_VERSION = 4
+        private const val DATABASE_VERSION = 5
     }
 
 }

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.2
+
+- Reworked duplicate detection so it uses only exact SHA-256 file-content hashes; similar filenames never count as duplicates.
+- Renamed byte-for-byte copies are correctly detected because filenames are irrelevant to the hash.
+- Duplicate imports are no longer blocked or automatically deleted.
+- Exact duplicate documents are highlighted in red across List, Compact and Grid layouts.
+- Added **Keep this copy** to dismiss an intentional duplicate warning while leaving the document in Scribit.
+- Deleting one copy automatically clears the warning on the final remaining copy.
+- Backup/restore now preserves intentional duplicate documents instead of dropping them by content hash.
+- Simplified About Scribit to show only version and build.
+- Simplified public GitHub Release notes so they no longer expose maintainer-only signing commentary.
+
 ## 1.3.1
 
 - Added persistent library layout switching from the Library header.
@@ -21,7 +33,7 @@
 
 ## 1.2.0
 
-- Switched GitHub releases from temporary debug signing to a permanent release-signing workflow.
+- Enabled normal in-place Android updates for the signed release line.
 - Added portable Scribit backup and restore.
 - Backups include archived document copies, metadata and non-secret settings while excluding API keys.
 - Added restore access to the fresh-install setup screen.
@@ -29,7 +41,7 @@
 - Added About/version information in Settings.
 - Kept long-press document deletion introduced in 1.1.
 - Kept local SHA-256 duplicate detection and the red duplicate warning introduced in 1.1.
-- GitHub releases now use semantic version tags and publish a verified signed `Scribit.apk`.
+- GitHub releases use semantic version tags and publish `Scribit.apk`.
 
 ## 1.1.0
 
